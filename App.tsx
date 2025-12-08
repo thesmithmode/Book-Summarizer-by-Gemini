@@ -114,18 +114,21 @@ const App = () => {
     if (!cleanKey) return;
 
     setIsVerifying(true);
+    console.log("Starting API Key validation...");
     
     try {
       // Create a temporary client to verify the key
       const ai = new GoogleGenAI({ apiKey: cleanKey });
       
-      // Send a minimal request to check if the key is valid and has access
-      // 'countTokens' is a lightweight operation. 
-      // If it fails (403/400), the key is invalid.
-      await ai.models.countTokens({
+      // STRICT VALIDATION:
+      // We perform a small generation task. 'countTokens' can be too permissive.
+      // If the key is invalid or lacks permission for the model, this will throw.
+      await ai.models.generateContent({
         model: GEMINI_MODEL,
-        contents: 'verify_key_check',
+        contents: { parts: [{ text: "Test" }] },
       });
+
+      console.log("API Key validated successfully.");
 
       // If we reach here, the key is valid
       localStorage.setItem("gemini_api_key", cleanKey);
@@ -133,7 +136,16 @@ const App = () => {
       setShowAuthScreen(false);
     } catch (error: any) {
       console.error("API Key Verification Failed:", error);
-      alert(`${T.invalidKey}\n\nDetails: ${error.message || "Unknown error"}`);
+      
+      let errorMsg = T.invalidKey;
+      if (error.message) {
+        errorMsg += `\n\nError from Google: ${error.message}`;
+      }
+      
+      alert(errorMsg);
+      // Ensure we don't save bad keys
+      localStorage.removeItem("gemini_api_key");
+      setApiKey("");
     } finally {
       setIsVerifying(false);
     }
