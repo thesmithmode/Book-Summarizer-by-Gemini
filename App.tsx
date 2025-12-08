@@ -15,6 +15,11 @@ import { LogEntry, ProcessingState } from './types';
 declare const marked: any;
 
 const App = () => {
+  // Auth State
+  const [apiKey, setApiKey] = useState<string>("");
+  const [showAuthScreen, setShowAuthScreen] = useState<boolean>(true);
+
+  // App State
   const [file, setFile] = useState<File | null>(null);
   const [processingState, setProcessingState] = useState<ProcessingState>(ProcessingState.IDLE);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -27,6 +32,15 @@ const App = () => {
   const [estimatedTotalSeconds, setEstimatedTotalSeconds] = useState<number | null>(null);
 
   const logEndRef = useRef<HTMLDivElement>(null);
+
+  // Check LocalStorage on load
+  useEffect(() => {
+    const storedKey = localStorage.getItem("gemini_api_key");
+    if (storedKey) {
+      setApiKey(storedKey);
+      setShowAuthScreen(false);
+    }
+  }, []);
 
   // Auto scroll logs
   useEffect(() => {
@@ -43,9 +57,7 @@ const App = () => {
         setElapsedSeconds(elapsed);
 
         // Estimate remaining time based on progress
-        if (progress > 5) { // Wait for some progress to estimate
-           // elapsed / total_time = progress / 100
-           // total_time = elapsed * 100 / progress
+        if (progress > 5) { 
            const total = Math.floor(elapsed * 100 / progress);
            setEstimatedTotalSeconds(total);
         }
@@ -53,6 +65,25 @@ const App = () => {
     }
     return () => clearInterval(interval);
   }, [processingState, startTime, progress]);
+
+  const handleSaveKey = (key: string) => {
+    if (key.trim().length > 10) {
+      localStorage.setItem("gemini_api_key", key.trim());
+      setApiKey(key.trim());
+      setShowAuthScreen(false);
+    } else {
+      alert("Пожалуйста, введите корректный API ключ");
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("gemini_api_key");
+    setApiKey("");
+    setShowAuthScreen(true);
+    setFile(null);
+    setFinalSummary("");
+    setLogs([]);
+  };
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
@@ -83,7 +114,7 @@ const App = () => {
   };
 
   const processBook = async () => {
-    if (!file) return;
+    if (!file || !apiKey) return;
 
     try {
       setStartTime(Date.now());
@@ -111,13 +142,13 @@ const App = () => {
       // --- STEP 1: EXTRACTION ---
       setProcessingState(ProcessingState.SUMMARIZING);
       const extractedSummaries: string[] = new Array(chunks.length).fill("");
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      
+      // Use the USER PROVIDED Key
+      const ai = new GoogleGenAI({ apiKey: apiKey });
       const modelName = 'gemini-3-pro-preview';
       
-      // Strict system instruction to prevent transliteration
       const systemInstruction = "Ты профессиональный литературный редактор. Твой язык вывода — СТРОГО РУССКИЙ (КИРИЛЛИЦА). Никогда не используй транслит. Никогда не отвечай на английском, если тебя не просили перевести.";
 
-      // Process chunks
       for (let i = 0; i < chunks.length; i += MAX_CONCURRENT_REQUESTS) {
         const batch = chunks.slice(i, i + MAX_CONCURRENT_REQUESTS);
         
@@ -140,10 +171,13 @@ const App = () => {
             
             addLog(`[Этап 1: Извлечение] Часть ${actualIdx + 1} готова (${duration}с). Ответ: ${outputLen} симв. Расход: ${tokens}.`, 'success');
             return { idx: actualIdx, text: response.text || "" };
-          } catch (err) {
+          } catch (err: any) {
             console.error(err);
+            // Handle specific auth errors
+            if (err.message.includes('API key') || err.status === 400 || err.status === 403) {
+                 throw new Error("Неверный API ключ или доступ запрещен. Пожалуйста, проверьте ключ.");
+            }
             addLog(`[Ошибка] Сбой при анализе части ${actualIdx + 1}: ${err.message}. Повторная попытка...`, 'warning');
-            // Simple retry logic could be added here, currently just returning empty string to fail gracefully or add manual retry
             return { idx: actualIdx, text: "" };
           }
         });
@@ -153,20 +187,24 @@ const App = () => {
           if (res.text) extractedSummaries[res.idx] = res.text;
         });
         
-        // Progress logic: Extraction is roughly 60% of work
         const extractedPercent = Math.round(((i + batch.length) / chunks.length) * 60);
         setProgress(extractedPercent);
       }
 
       const combinedDraft = extractedSummaries.filter(s => s.trim().length > 0).join("\n\n---\n\n");
+      
+      if (combinedDraft.length === 0) {
+         throw new Error("Не удалось извлечь информацию ни из одной части книги.");
+      }
+
       addLog(`[Этап 1] Завершен. Общий объем черновика: ${combinedDraft.length.toLocaleString()} символов.`, 'success');
 
-      // --- STEP 2: CONSOLIDATION (Only if multiple chunks) ---
+      // --- STEP 2: CONSOLIDATION ---
       let textToPolish = combinedDraft;
       
       if (!isSingleChunk) {
         addLog(`[Этап 2: Консолидация] Объединение ${chunks.length} частей в единый связный текст...`);
-        setProcessingState(ProcessingState.POLISHING); // UI state
+        setProcessingState(ProcessingState.POLISHING);
         
         const consolidateStart = Date.now();
         const consolidatedResponse = await ai.models.generateContent({
@@ -235,30 +273,98 @@ const App = () => {
     addLog("[Интерфейс] Файл Markdown скачан.", 'info');
   };
 
+  // --- Auth Screen Component ---
+  if (showAuthScreen) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4 bg-neutral-950">
+        <div className="bg-neutral-900 border border-neutral-800 p-8 rounded-2xl max-w-md w-full shadow-2xl">
+          <h1 className="text-3xl font-serif font-bold text-white mb-2 text-center">AI Book Summarizer</h1>
+          <p className="text-gray-400 text-center mb-8 text-sm">
+            Для работы приложения требуется ваш личный ключ Gemini API.
+            Приложение работает полностью в браузере, ключ никуда не передается.
+          </p>
+          
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">Ваш API Key</label>
+              <input 
+                type="password" 
+                placeholder="Вставьте AI Studio API Key..."
+                className="w-full bg-black border border-neutral-700 rounded-lg px-4 py-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSaveKey(e.currentTarget.value);
+                }}
+                onChange={(e) => {
+                  // If user pastes key, auto-focus button or validation could happen here
+                }}
+              />
+            </div>
+            
+            <button 
+              onClick={(e) => {
+                const input = e.currentTarget.parentElement?.querySelector('input');
+                if (input) handleSaveKey(input.value);
+              }}
+              className="w-full bg-white text-black font-semibold py-3 rounded-lg hover:bg-gray-200 transition-colors"
+            >
+              Войти
+            </button>
+          </div>
+
+          <div className="mt-6 text-center text-xs text-gray-500">
+            <p>Нет ключа?</p>
+            <a 
+              href="https://aistudiocdn.com/app/apikey" 
+              target="_blank" 
+              rel="noreferrer"
+              className="text-indigo-400 hover:text-indigo-300 underline mt-1 inline-block"
+            >
+              Получить бесплатно в Google AI Studio
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // --- Main App UI ---
   return (
     <div className="min-h-screen p-4 md:p-8 max-w-4xl mx-auto">
-      <header className="mb-8 text-center">
+      <header className="mb-8 flex flex-col items-center relative">
         <h1 className="text-3xl font-serif font-bold text-white mb-2 tracking-tight">AI Book Summarizer</h1>
         <p className="text-gray-400 text-sm">Глубокий анализ книг с помощью AI (Gemini 3)</p>
+        
+        <button 
+          onClick={handleLogout}
+          className="absolute right-0 top-0 text-xs text-neutral-600 hover:text-neutral-400 transition-colors border border-neutral-800 px-3 py-1 rounded hover:bg-neutral-800"
+          title="Сменить API Ключ"
+        >
+          Выход
+        </button>
       </header>
 
       {/* File Upload Section */}
-      <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-8 mb-6 text-center transition-all hover:border-neutral-700">
+      <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-8 mb-6 text-center transition-all hover:border-neutral-700 relative overflow-hidden">
         <input
           type="file"
           id="fileInput"
           accept=".pdf,.epub,.fb2,.xml,.txt"
           onChange={handleFileChange}
           className="hidden"
+          disabled={processingState !== ProcessingState.IDLE && processingState !== ProcessingState.COMPLETED && processingState !== ProcessingState.ERROR}
         />
         <label
           htmlFor="fileInput"
-          className="cursor-pointer inline-flex items-center justify-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-black bg-white hover:bg-gray-200 transition-colors"
+          className={`inline-flex items-center justify-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-black bg-white transition-all 
+            ${(processingState !== ProcessingState.IDLE && processingState !== ProcessingState.COMPLETED && processingState !== ProcessingState.ERROR) 
+              ? 'opacity-50 cursor-not-allowed' 
+              : 'hover:bg-gray-200 cursor-pointer'}`}
         >
           {file ? 'Выбрать другую книгу' : 'Выберите книгу (PDF, EPUB, FB2)'}
         </label>
+        
         {file && (
-          <div className="mt-4 text-gray-300">
+          <div className="mt-4 text-gray-300 z-10 relative">
             <p className="font-medium">{file.name}</p>
             <p className="text-xs text-gray-500 uppercase mt-1">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
             
@@ -281,7 +387,7 @@ const App = () => {
             <div className="flex items-center gap-4">
                 <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Лог процесса</h2>
                 {processingState !== ProcessingState.IDLE && processingState !== ProcessingState.COMPLETED && processingState !== ProcessingState.ERROR && (
-                    <div className="text-xs font-mono text-gray-500 bg-neutral-800 px-2 py-1 rounded">
+                    <div className="text-xs font-mono text-gray-500 bg-neutral-800 px-2 py-1 rounded hidden sm:block">
                         <span>Прошло: <span className="text-white">{formatTime(elapsedSeconds)}</span></span>
                         {estimatedTotalSeconds !== null && (
                             <span className="ml-2 pl-2 border-l border-gray-600">
