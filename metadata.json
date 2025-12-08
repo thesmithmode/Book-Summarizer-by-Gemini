@@ -1,5 +1,5 @@
 {
-  "name": "EssenceReader",
+  "name": "AI Book Summarizer",
   "description": "A powerful AI-driven book summarizer that extracts, synthesizes, and structures deep knowledge from PDFs, EPUBs, and FB2s into obsidian-ready notes.",
   "requestFramePermissions": []
 }
