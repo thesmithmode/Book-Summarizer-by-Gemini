@@ -20,6 +20,7 @@ const App = () => {
   // Auth State
   const [apiKey, setApiKey] = useState<string>("");
   const [showAuthScreen, setShowAuthScreen] = useState<boolean>(true);
+  const [isVerifying, setIsVerifying] = useState<boolean>(false);
 
   // App State
   const [activeTab, setActiveTab] = useState<'analyze' | 'history'>('analyze');
@@ -108,13 +109,33 @@ const App = () => {
     localStorage.setItem("app_language", lang);
   };
 
-  const handleSaveKey = (key: string) => {
-    if (key.trim().length > 10) {
-      localStorage.setItem("gemini_api_key", key.trim());
-      setApiKey(key.trim());
+  const handleSaveKey = async (key: string) => {
+    const cleanKey = key.trim();
+    if (!cleanKey) return;
+
+    setIsVerifying(true);
+    
+    try {
+      // Create a temporary client to verify the key
+      const ai = new GoogleGenAI({ apiKey: cleanKey });
+      
+      // Send a minimal request to check if the key is valid and has access
+      // 'countTokens' is a lightweight operation. 
+      // If it fails (403/400), the key is invalid.
+      await ai.models.countTokens({
+        model: GEMINI_MODEL,
+        contents: 'verify_key_check',
+      });
+
+      // If we reach here, the key is valid
+      localStorage.setItem("gemini_api_key", cleanKey);
+      setApiKey(cleanKey);
       setShowAuthScreen(false);
-    } else {
-      alert("Invalid API Key");
+    } catch (error: any) {
+      console.error("API Key Verification Failed:", error);
+      alert(`${T.invalidKey}\n\nDetails: ${error.message || "Unknown error"}`);
+    } finally {
+      setIsVerifying(false);
     }
   };
 
@@ -428,7 +449,8 @@ const App = () => {
             <input 
               type="password" 
               placeholder={T.inputPlaceholder}
-              className="w-full bg-black border border-neutral-700 rounded-lg px-4 py-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all placeholder-neutral-600"
+              disabled={isVerifying}
+              className={`w-full bg-black border border-neutral-700 rounded-lg px-4 py-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all placeholder-neutral-600 ${isVerifying ? 'opacity-50 cursor-wait' : ''}`}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') handleSaveKey(e.currentTarget.value);
               }}
@@ -440,9 +462,10 @@ const App = () => {
               const input = e.currentTarget.parentElement?.querySelector('input');
               if (input) handleSaveKey(input.value);
             }}
-            className="w-full bg-white hover:bg-gray-100 text-black font-bold py-3 rounded-lg transition-all transform active:scale-[0.98]"
+            disabled={isVerifying}
+            className={`w-full bg-white hover:bg-gray-100 text-black font-bold py-3 rounded-lg transition-all transform active:scale-[0.98] ${isVerifying ? 'opacity-50 cursor-wait' : ''}`}
           >
-            {T.loginButton}
+            {isVerifying ? T.verifying : T.loginButton}
           </button>
         </div>
 
