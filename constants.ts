@@ -1,26 +1,19 @@
 import { Language } from "./types";
 
-export const CHUNK_SIZE = 300000; // ~75-80k tokens context window optimization
+// Drastically reduced chunk size to force detailed analysis (approx 10-15 pages per chunk)
+// This matches the user's "27 parts" preference for high fidelity.
+export const CHUNK_SIZE = 40000; 
 export const MAX_CONCURRENT_REQUESTS = 1;
 export const GEMINI_MODEL = 'gemini-3-pro-preview';
 
-// UI Dictionary with translations for all features
+// UI Dictionary
 export const UI_TEXT: Record<Language, any> = {
   EN: {
     title: "AI Book Summarizer",
-    subtitle: "Deep knowledge extraction using Gemini 3",
-    loginTitle: "AI Book Summarizer",
-    loginSubtitle: "This app runs entirely in your browser. Your key is stored locally.",
-    inputPlaceholder: "Paste your AI Studio API Key...",
-    loginButton: "Enter",
-    verifying: "Verifying Key...",
-    invalidKey: "Invalid API Key. Access denied by Google.",
-    noKey: "No key?",
-    getKeyLink: "Get a free key from Google AI Studio",
-    logout: "Exit / Change Key",
+    subtitle: "Deep knowledge extraction (Obsidian Style)",
     selectFile: "Select Book (PDF, EPUB, FB2)",
     changeFile: "Select Different Book",
-    startAnalysis: "Start Analysis",
+    startAnalysis: "Start Deep Analysis",
     logs: "Process Log",
     timeElapsed: "Elapsed",
     timeRem: "Est. Left",
@@ -32,14 +25,13 @@ export const UI_TEXT: Record<Language, any> = {
     fileParsed: "File parsed in",
     chars: "chars",
     chunking: "Splitting text",
-    step1: "Phase 1: Extraction",
+    step1: "Phase 1: Deep Extraction",
     step2: "Phase 2: Consolidation",
-    step3: "Phase 3: Polishing",
+    step3: "Phase 3: Polishing & Formatting",
     error: "Error",
     criticalError: "Critical Error",
     tokenUsage: "Session Token Usage",
     checkQuota: "Check Google Quota",
-    // New History & Tabs
     tabAnalyze: "Analyze",
     tabHistory: "History",
     historyEmpty: "No summaries found yet.",
@@ -48,25 +40,16 @@ export const UI_TEXT: Record<Language, any> = {
     delete: "Delete",
     view: "View",
     restoreMsg: "History imported successfully",
-    statusThinking: "AI is thinking...",
-    statusReading: "Reading document structure...",
-    statusWriting: "Writing summary..."
+    statusThinking: "AI is extracting insights...",
+    statusReading: "Reading document...",
+    statusWriting: "Structuring final notes..."
   },
   RU: {
     title: "AI Book Summarizer",
-    subtitle: "Глубокий анализ книг с помощью Gemini 3",
-    loginTitle: "AI Book Summarizer",
-    loginSubtitle: "Приложение работает в браузере. Ваш ключ хранится локально.",
-    inputPlaceholder: "Вставьте AI Studio API Key...",
-    loginButton: "Войти",
-    verifying: "Проверка ключа...",
-    invalidKey: "Неверный API Key. Доступ отклонен Google.",
-    noKey: "Нет ключа?",
-    getKeyLink: "Получить бесплатно в Google AI Studio",
-    logout: "Выход / Сменить ключ",
+    subtitle: "Глубокий анализ книг (стиль Obsidian)",
     selectFile: "Выберите книгу (PDF, EPUB, FB2)",
     changeFile: "Выбрать другую книгу",
-    startAnalysis: "Начать анализ",
+    startAnalysis: "Начать глубокий анализ",
     logs: "Лог процесса",
     timeElapsed: "Прошло",
     timeRem: "Осталось",
@@ -78,14 +61,13 @@ export const UI_TEXT: Record<Language, any> = {
     fileParsed: "Файл прочитан за",
     chars: "симв.",
     chunking: "Разбиение текста",
-    step1: "Этап 1: Извлечение",
-    step2: "Этап 2: Консолидация",
-    step3: "Этап 3: Шлифовка",
+    step1: "Этап 1: Глубокое извлечение",
+    step2: "Этап 2: Сборка (Консолидация)",
+    step3: "Этап 3: Шлифовка и структура",
     error: "Ошибка",
     criticalError: "Критическая ошибка",
     tokenUsage: "Токенов за сессию",
     checkQuota: "Проверить квоты Google",
-    // New History & Tabs
     tabAnalyze: "Анализ",
     tabHistory: "История",
     historyEmpty: "История пуста.",
@@ -94,25 +76,16 @@ export const UI_TEXT: Record<Language, any> = {
     delete: "Удалить",
     view: "Открыть",
     restoreMsg: "История успешно восстановлена",
-    statusThinking: "Нейросеть думает...",
-    statusReading: "Анализ структуры документа...",
-    statusWriting: "Написание резюме..."
+    statusThinking: "Нейросеть извлекает смыслы...",
+    statusReading: "Чтение документа...",
+    statusWriting: "Структурирование заметки..."
   },
   ES: {
     title: "Resumidor de Libros IA",
-    subtitle: "Extracción profunda de conocimiento usando Gemini 3",
-    loginTitle: "Resumidor de Libros IA",
-    loginSubtitle: "Esta aplicación se ejecuta en tu navegador. Tu clave se guarda localmente.",
-    inputPlaceholder: "Pega tu clave API de AI Studio...",
-    loginButton: "Entrar",
-    verifying: "Verificando...",
-    invalidKey: "Clave API inválida. Acceso denegado.",
-    noKey: "¿Sin clave?",
-    getKeyLink: "Obtén una clave gratis en Google AI Studio",
-    logout: "Salir",
+    subtitle: "Extracción profunda (Estilo Obsidian)",
     selectFile: "Seleccionar Libro (PDF, EPUB, FB2)",
     changeFile: "Seleccionar otro libro",
-    startAnalysis: "Iniciar Análisis",
+    startAnalysis: "Iniciar Análisis Profundo",
     logs: "Registro del Proceso",
     timeElapsed: "Transcurrido",
     timeRem: "Restante",
@@ -124,14 +97,13 @@ export const UI_TEXT: Record<Language, any> = {
     fileParsed: "Archivo analizado en",
     chars: "caracteres",
     chunking: "Dividiendo texto",
-    step1: "Fase 1: Extracción",
+    step1: "Fase 1: Extracción Profunda",
     step2: "Fase 2: Consolidación",
-    step3: "Fase 3: Pulido",
+    step3: "Fase 3: Pulido y Estructura",
     error: "Error",
     criticalError: "Error Crítico",
     tokenUsage: "Uso de Tokens",
     checkQuota: "Verificar Cuota",
-    // New History & Tabs
     tabAnalyze: "Analizar",
     tabHistory: "Historial",
     historyEmpty: "No hay historial.",
@@ -140,25 +112,16 @@ export const UI_TEXT: Record<Language, any> = {
     delete: "Borrar",
     view: "Ver",
     restoreMsg: "Historial restaurado",
-    statusThinking: "IA pensando...",
-    statusReading: "Leyendo estructura...",
-    statusWriting: "Escribiendo resumen..."
+    statusThinking: "IA extrayendo...",
+    statusReading: "Leyendo...",
+    statusWriting: "Estructurando..."
   },
   DE: {
     title: "AI Buch-Zusammenfasser",
-    subtitle: "Tiefe Wissensextraktion mit Gemini 3",
-    loginTitle: "AI Buch-Zusammenfasser",
-    loginSubtitle: "Diese App läuft lokal. Ihr Schlüssel wird sicher gespeichert.",
-    inputPlaceholder: "AI Studio API Key einfügen...",
-    loginButton: "Eintreten",
-    verifying: "Überprüfen...",
-    invalidKey: "Ungültiger API-Schlüssel.",
-    noKey: "Kein Schlüssel?",
-    getKeyLink: "Kostenlosen Schlüssel erhalten",
-    logout: "Ausgang",
-    selectFile: "Buch auswählen (PDF, EPUB, FB2)",
+    subtitle: "Tiefe Extraktion (Obsidian-Stil)",
+    selectFile: "Buch auswählen",
     changeFile: "Anderes Buch wählen",
-    startAnalysis: "Analyse starten",
+    startAnalysis: "Tiefenanalyse starten",
     logs: "Prozessprotokoll",
     timeElapsed: "Vergangen",
     timeRem: "Verbleibend",
@@ -170,14 +133,13 @@ export const UI_TEXT: Record<Language, any> = {
     fileParsed: "Datei analysiert in",
     chars: "Zeichen",
     chunking: "Textaufteilung",
-    step1: "Phase 1: Extraktion",
+    step1: "Phase 1: Tiefe Extraktion",
     step2: "Phase 2: Konsolidierung",
-    step3: "Phase 3: Polieren",
+    step3: "Phase 3: Strukturierung",
     error: "Fehler",
     criticalError: "Kritischer Fehler",
     tokenUsage: "Token-Verbrauch",
     checkQuota: "Quote prüfen",
-    // New History & Tabs
     tabAnalyze: "Analysieren",
     tabHistory: "Verlauf",
     historyEmpty: "Kein Verlauf.",
@@ -186,26 +148,17 @@ export const UI_TEXT: Record<Language, any> = {
     delete: "Löschen",
     view: "Ansehen",
     restoreMsg: "Verlauf wiederhergestellt",
-    statusThinking: "KI denkt...",
-    statusReading: "Lese Struktur...",
-    statusWriting: "Schreibe Zusammenfassung..."
+    statusThinking: "KI extrahiert...",
+    statusReading: "Lese...",
+    statusWriting: "Strukturierung..."
   },
   FR: {
     title: "Résumeur de Livres IA",
-    subtitle: "Extraction de connaissances approfondie avec Gemini 3",
-    loginTitle: "Résumeur de Livres IA",
-    loginSubtitle: "Cette application fonctionne dans votre navigateur. Votre clé est stockée localement.",
-    inputPlaceholder: "Collez votre clé API AI Studio...",
-    loginButton: "Entrer",
-    verifying: "Vérification...",
-    invalidKey: "Clé API invalide.",
-    noKey: "Pas de clé ?",
-    getKeyLink: "Obtenir une clé gratuite",
-    logout: "Sortie",
-    selectFile: "Sélectionner un livre (PDF, EPUB, FB2)",
+    subtitle: "Extraction approfondie (Style Obsidian)",
+    selectFile: "Sélectionner un livre",
     changeFile: "Choisir un autre livre",
-    startAnalysis: "Lancer l'analyse",
-    logs: "Journal du processus",
+    startAnalysis: "Analyse approfondie",
+    logs: "Journal",
     timeElapsed: "Écoulé",
     timeRem: "Restant",
     summaryTitle: "Résumé",
@@ -215,15 +168,14 @@ export const UI_TEXT: Record<Language, any> = {
     copySuccess: "Copié",
     fileParsed: "Fichier analysé en",
     chars: "caractères",
-    chunking: "Découpage du texte",
-    step1: "Phase 1 : Extraction",
+    chunking: "Découpage",
+    step1: "Phase 1 : Extraction approfondie",
     step2: "Phase 2 : Consolidation",
-    step3: "Phase 3 : Peaufinage",
+    step3: "Phase 3 : Structure finale",
     error: "Erreur",
     criticalError: "Erreur Critique",
     tokenUsage: "Usage des jetons",
     checkQuota: "Vérifier quota",
-    // New History & Tabs
     tabAnalyze: "Analyser",
     tabHistory: "Historique",
     historyEmpty: "Historique vide.",
@@ -232,17 +184,16 @@ export const UI_TEXT: Record<Language, any> = {
     delete: "Supprimer",
     view: "Voir",
     restoreMsg: "Historique restauré",
-    statusThinking: "IA réfléchit...",
-    statusReading: "Lecture de la structure...",
+    statusThinking: "IA extrait...",
+    statusReading: "Lecture...",
     statusWriting: "Rédaction..."
   }
 };
 
-// Prompts Generation Function - Crucial for language direction
 export const getPrompts = (lang: Language) => {
   const langNameMap = {
     EN: "ENGLISH",
-    RU: "RUSSIAN (CYRILLIC)",
+    RU: "RUSSIAN",
     ES: "SPANISH",
     DE: "GERMAN",
     FR: "FRENCH"
@@ -250,41 +201,46 @@ export const getPrompts = (lang: Language) => {
 
   const targetLang = langNameMap[lang];
 
+  // User provided strict Russian prompts. I map them exactly for RU, and translate the concept for others.
+  
+  const extractPrompt = lang === 'RU' 
+    ? `Извлеки и синтезируй самую ценную, важную и практически применимую информацию из всех предоставленных источников. Полностью исключи теоретическую "воду", исторические отступления, анекдоты и любые другие неessentialные детали. Сформируй структурированное резюме, которое позволит понять суть всех источников без необходимости читать их целиком.
+    
+    Если ты что-то упустил или тебе не хватило места, чтобы написать, можешь разбить ответ на несколько частей, главное укажи в начале часть. Например 2/5.
+    
+    Точно всё? Ты ничего не упустил? Перепроверь.
+    Язык вывода: РУССКИЙ.`
+    : `Extract and synthesize the most valuable, important, and practically applicable information from the provided text. Completely exclude theoretical "fluff", historical digressions, anecdotes, and any other non-essential details. Form a structured summary that allows understanding the essence of all sources without reading them entirely.
+    
+    If you miss something or run out of space, verify and continue.
+    OUTPUT LANGUAGE: ${targetLang}.`;
+
+  const consolidatePrompt = lang === 'RU'
+    ? `В документе представлено несколько пересказов одного и того же источника (последовательных частей книги). Твоя задача скомпилировать из них единый, исчерпывающий пересказ, без потери полезной информации. Если используешь заголовки, то не используй заголовки старше 3 (###) включительно, используй 4, 5, 6. Изменения следует вносить в сам документ.
+    
+    Язык вывода: РУССКИЙ.`
+    : `The document contains several summaries of sequential parts of a single book. Your task is to compile them into a single, exhaustive summary without losing useful information. If using headers, do not use headers larger than Level 3 (###). Use ####, #####, ######. Merge into a cohesive text.
+    
+    OUTPUT LANGUAGE: ${targetLang}.`;
+
+  const polishPrompt = lang === 'RU'
+    ? `Структурируй текст ниже. Используй, если необходимо, заголовки H4 - H6, вложенные списки, нумерованные списки и т.д. 
+    
+    ТЕБЕ ЗАПРЕЩЕНО ИСПОЛЬЗОВАНИЕ *ЖИРНОГО* И **КУРСИВА**. ВЕСЬ ТЕКСТ ДОЛЖЕН БЫТЬ ОБЫЧНЫМ (Regular weight).
+    
+    Важно не потерять информацию, а структурировать её для Obsidian.
+    Язык вывода: РУССКИЙ.`
+    : `Structure the text below. Use headers H4 - H6, nested lists, numbered lists, etc.
+    
+    YOU ARE PROHIBITED FROM USING *BOLD* OR **ITALICS**.
+    
+    It is important not to lose information.
+    OUTPUT LANGUAGE: ${targetLang}.`;
+
   return {
-    // System instruction enforces language and persona
-    systemInstruction: `You are a professional book editor and summarizer. Your output language must be STRICTLY ${targetLang}. Never use other languages unless explicitly asked to translate.`,
-    
-    extract: `
-      Extract and synthesize the most valuable, important, and practically applicable information from the provided text.
-      Completely exclude theoretical "fluff", historical digressions, anecdotes, and any other non-essential details.
-      Form a structured summary that allows understanding the essence without reading the whole text.
-      
-      If the text is cut off (as it is a chunk of a larger book), do not invent an ending, just process what is there.
-      Structure the answer using headers.
-      
-      OUTPUT LANGUAGE: ${targetLang}.
-      
-      Are you sure? Did you miss anything? Double check.
-    `,
-    
-    consolidate: `
-      The document contains several summaries of sequential parts of a single book.
-      Your task is to compile them into a single, exhaustive summary without losing useful information.
-      If using headers, do not use headers larger than Level 3 (###). Use ####, #####, ######.
-      Merge repeating themes, create a smooth narrative flow.
-      
-      OUTPUT LANGUAGE: ${targetLang}.
-    `,
-    
-    polish: `
-      Structure the provided text for a final note in Obsidian.
-      Use headers H4 - H6 for hierarchy.
-      Use nested lists for details.
-      You are PROHIBITED from using *bold* and **italics**. All text must be regular weight.
-      Ensure logic and structure. It is important not to lose information but to present it as concisely and usefully as possible.
-      
-      Output format: Markdown.
-      OUTPUT LANGUAGE: ${targetLang}.
-    `
+    systemInstruction: `You are a strict technical editor. Your output language is ${targetLang}. You follow instructions literally. No Markdown bold or italics allowed.`,
+    extract: extractPrompt,
+    consolidate: consolidatePrompt,
+    polish: polishPrompt
   };
 };

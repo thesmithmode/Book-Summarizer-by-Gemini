@@ -17,11 +17,6 @@ const App = () => {
   // Config State
   const [language, setLanguage] = useState<Language>('EN');
   
-  // Auth State
-  const [apiKey, setApiKey] = useState<string>("");
-  const [showAuthScreen, setShowAuthScreen] = useState<boolean>(true);
-  const [isVerifying, setIsVerifying] = useState<boolean>(false);
-
   // App State
   const [activeTab, setActiveTab] = useState<'analyze' | 'history'>('analyze');
   const [file, setFile] = useState<File | null>(null);
@@ -29,7 +24,7 @@ const App = () => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [finalSummary, setFinalSummary] = useState<string>("");
   const [progress, setProgress] = useState(0);
-  const [currentStatusMsg, setCurrentStatusMsg] = useState<string>(""); // For pulsing status
+  const [currentStatusMsg, setCurrentStatusMsg] = useState<string>("");
 
   // History State
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -41,28 +36,20 @@ const App = () => {
   const [sessionTokens, setSessionTokens] = useState<number>(0);
 
   const logEndRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null); // For history import
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Text Helper
   const T = UI_TEXT[language];
 
-  // --- Initialization & Persistance ---
+  // --- Initialization ---
 
   useEffect(() => {
-    // 1. Recover API Key
-    const storedKey = localStorage.getItem("gemini_api_key");
-    if (storedKey) {
-      setApiKey(storedKey);
-      setShowAuthScreen(false);
-    }
-    
-    // 2. Recover Language
+    // Recover Language
     const storedLang = localStorage.getItem("app_language");
     if (storedLang && ['EN','RU','ES','DE','FR'].includes(storedLang)) {
       setLanguage(storedLang as Language);
     }
 
-    // 3. Recover History
+    // Recover History
     try {
       const storedHistory = localStorage.getItem("summary_history");
       if (storedHistory) {
@@ -73,17 +60,15 @@ const App = () => {
     }
   }, []);
 
-  // Save history whenever it changes
   useEffect(() => {
     localStorage.setItem("summary_history", JSON.stringify(history));
   }, [history]);
 
-  // Auto scroll logs
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [logs]);
 
-  // Timer logic
+  // Timer
   useEffect(() => {
     let interval: any;
     if (processingState !== ProcessingState.IDLE && processingState !== ProcessingState.COMPLETED && processingState !== ProcessingState.ERROR && startTime) {
@@ -92,7 +77,6 @@ const App = () => {
         const elapsed = Math.floor((now - startTime) / 1000);
         setElapsedSeconds(elapsed);
 
-        // Estimate remaining time based on progress
         if (progress > 5) { 
            const total = Math.floor(elapsed * 100 / progress);
            setEstimatedTotalSeconds(total);
@@ -109,60 +93,6 @@ const App = () => {
     localStorage.setItem("app_language", lang);
   };
 
-  const handleSaveKey = async (key: string) => {
-    const cleanKey = key.trim();
-    if (!cleanKey) return;
-
-    setIsVerifying(true);
-    console.log("Starting API Key validation...");
-    
-    try {
-      // Create a temporary client to verify the key
-      const ai = new GoogleGenAI({ apiKey: cleanKey });
-      
-      // STRICT VALIDATION:
-      // We perform a small generation task. 'countTokens' can be too permissive.
-      // If the key is invalid or lacks permission for the model, this will throw.
-      await ai.models.generateContent({
-        model: GEMINI_MODEL,
-        contents: { parts: [{ text: "Test" }] },
-      });
-
-      console.log("API Key validated successfully.");
-
-      // If we reach here, the key is valid
-      localStorage.setItem("gemini_api_key", cleanKey);
-      setApiKey(cleanKey);
-      setShowAuthScreen(false);
-    } catch (error: any) {
-      console.error("API Key Verification Failed:", error);
-      
-      let errorMsg = T.invalidKey;
-      if (error.message) {
-        errorMsg += `\n\nError from Google: ${error.message}`;
-      }
-      
-      alert(errorMsg);
-      // Ensure we don't save bad keys
-      localStorage.removeItem("gemini_api_key");
-      setApiKey("");
-    } finally {
-      setIsVerifying(false);
-    }
-  };
-
-  const handleLogout = () => {
-    // We do NOT clear history on logout, only the key
-    localStorage.removeItem("gemini_api_key");
-    setApiKey("");
-    setShowAuthScreen(true);
-    setFile(null);
-    setFinalSummary("");
-    setLogs([]);
-    setSessionTokens(0);
-    setActiveTab('analyze');
-  };
-
   const addLog = (message: string, type: LogEntry['type'] = 'info') => {
     setLogs(prev => [...prev, {
       id: Math.random().toString(36).substring(7),
@@ -172,7 +102,7 @@ const App = () => {
     }]);
   };
 
-  // --- Core Logic: Processing ---
+  // --- Core Processing Logic ---
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -189,10 +119,9 @@ const App = () => {
   };
 
   const processBook = async () => {
-    if (!file || !apiKey) return;
+    if (!file) return;
 
     try {
-      // Init Stats
       setStartTime(Date.now());
       setProcessingState(ProcessingState.PARSING);
       setCurrentStatusMsg(T.statusReading);
@@ -204,11 +133,9 @@ const App = () => {
       const parseDuration = ((Date.now() - parseStart) / 1000).toFixed(2);
       addLog(`${T.fileParsed} ${parseDuration}s. Size: ${text.length.toLocaleString()} ${T.chars}.`, 'success');
 
-      if (text.length < 100) {
-        throw new Error("Text too short. File might be empty or encrypted.");
-      }
+      if (text.length < 100) throw new Error("Text too short.");
 
-      // 2. Chunking
+      // 2. Chunking (Smaller chunks for higher fidelity)
       setProcessingState(ProcessingState.CHUNKING);
       setCurrentStatusMsg(T.chunking);
       const chunks: string[] = [];
@@ -216,15 +143,13 @@ const App = () => {
         chunks.push(text.slice(i, i + CHUNK_SIZE));
       }
       
-      const isSingleChunk = chunks.length === 1;
-      addLog(`${T.chunking}: ${chunks.length} parts (~${(CHUNK_SIZE / 1000).toFixed(0)}k ${T.chars}).`);
+      addLog(`${T.chunking}: ${chunks.length} parts (~${(CHUNK_SIZE / 1000).toFixed(0)}k chars each). High detail mode.`);
 
-      // Initialize AI
-      // CRITICAL: New instance to ensure key is fresh
-      const ai = new GoogleGenAI({ apiKey: apiKey });
+      // Initialize AI with Env Key
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const prompts = getPrompts(language);
       
-      // 3. Extraction (Step 1)
+      // 3. Extraction (Stage 1)
       setProcessingState(ProcessingState.SUMMARIZING);
       setCurrentStatusMsg(T.statusThinking);
       const extractedSummaries: string[] = new Array(chunks.length).fill("");
@@ -235,29 +160,25 @@ const App = () => {
         const batchPromises = batch.map(async (chunk, batchIdx) => {
           const actualIdx = i + batchIdx;
           const chunkStartTime = Date.now();
-          addLog(`[${T.step1}] Part ${actualIdx + 1}/${chunks.length} -> Gemini 3...`);
+          addLog(`[${T.step1}] Analyzing part ${actualIdx + 1}/${chunks.length}...`);
           
           try {
             const response = await ai.models.generateContent({
               model: GEMINI_MODEL,
-              contents: `${prompts.extract}\n\nBOOK CONTENT (PART ${actualIdx + 1}):\n${chunk}`,
+              contents: `${prompts.extract}\n\nCONTENT PART ${actualIdx + 1}:\n${chunk}`,
               config: { systemInstruction: prompts.systemInstruction }
             });
 
             const duration = ((Date.now() - chunkStartTime) / 1000).toFixed(1);
-            const outputLen = response.text?.length || 0;
+            const outputText = response.text || "";
             const usage = response.usageMetadata?.totalTokenCount || 0;
             setSessionTokens(prev => prev + usage);
             
-            addLog(`[${T.step1}] Part ${actualIdx + 1} done (${duration}s). Output: ${outputLen} chars.`, 'success');
-            return { idx: actualIdx, text: response.text || "" };
+            addLog(`[${T.step1}] Part ${actualIdx + 1} extracted (${duration}s). Length: ${outputText.length}.`, 'success');
+            return { idx: actualIdx, text: outputText };
           } catch (err: any) {
             console.error(err);
-            if (err.message?.includes('API key') || err.status === 400 || err.status === 403) {
-                 throw new Error("Invalid API Key or Access Denied.");
-            }
-            addLog(`[${T.error}] Part ${actualIdx + 1}: ${err.message}. Retrying...`, 'warning');
-            // In a real app we might retry here, but for now we return empty to not crash the whole chain
+            addLog(`[${T.error}] Part ${actualIdx + 1}: ${err.message}`, 'warning');
             return { idx: actualIdx, text: "" };
           }
         });
@@ -271,63 +192,52 @@ const App = () => {
         setProgress(extractedPercent);
       }
 
-      const combinedDraft = extractedSummaries.filter(s => s.trim().length > 0).join("\n\n---\n\n");
+      const combinedDraft = extractedSummaries.filter(s => s.trim().length > 0).join("\n\n");
       
-      if (combinedDraft.length === 0) {
-         throw new Error("Failed to extract any text.");
-      }
+      if (combinedDraft.length === 0) throw new Error("Failed to extract any text.");
 
-      // 4. Consolidation (Step 2)
-      let textToPolish = combinedDraft;
-      
-      if (!isSingleChunk) {
-        addLog(`[${T.step2}] Consolidating ${chunks.length} parts...`);
-        setProcessingState(ProcessingState.POLISHING); // Re-use styling
-        setCurrentStatusMsg(T.statusThinking);
-        
-        const consolidateStart = Date.now();
-        const consolidatedResponse = await ai.models.generateContent({
-          model: GEMINI_MODEL,
-          contents: `${prompts.consolidate}\n\nSUMMARIES:\n${combinedDraft}`,
-          config: { systemInstruction: prompts.systemInstruction }
-        });
-        
-        const consolidateDuration = ((Date.now() - consolidateStart) / 1000).toFixed(1);
-        textToPolish = consolidatedResponse.text || "";
-        const usage = consolidatedResponse.usageMetadata?.totalTokenCount || 0;
-        setSessionTokens(prev => prev + usage);
-        
-        addLog(`[${T.step2}] Done (${consolidateDuration}s). Result: ${textToPolish.length.toLocaleString()} ${T.chars}.`, 'success');
-        setProgress(80);
-      } else {
-        setProgress(70);
-        addLog(`[${T.step2}] Skipped (single part).`);
-      }
-
-      // 5. Polishing (Step 3)
-      addLog(`[${T.step3}] Final structuring...`);
+      // 4. Consolidation (Stage 2)
+      // Even if it's 1 chunk, we pass it through consolidation to ensure strict format if the first pass was messy
       setProcessingState(ProcessingState.POLISHING);
+      setCurrentStatusMsg(T.statusThinking);
+      
+      addLog(`[${T.step2}] Consolidating ${chunks.length} parts...`);
+      const consolidateStart = Date.now();
+      
+      const consolidatedResponse = await ai.models.generateContent({
+        model: GEMINI_MODEL,
+        contents: `${prompts.consolidate}\n\nEXTRACTED DRAFTS:\n${combinedDraft}`,
+        config: { systemInstruction: prompts.systemInstruction }
+      });
+      
+      const consolidateDuration = ((Date.now() - consolidateStart) / 1000).toFixed(1);
+      const consolidatedText = consolidatedResponse.text || "";
+      const usageConsolidate = consolidatedResponse.usageMetadata?.totalTokenCount || 0;
+      setSessionTokens(prev => prev + usageConsolidate);
+      
+      addLog(`[${T.step2}] Consolidation done (${consolidateDuration}s). Size: ${consolidatedText.length}.`, 'success');
+      setProgress(80);
+
+      // 5. Polishing (Stage 3)
+      addLog(`[${T.step3}] Final formatting (Obsidian style)...`);
       setCurrentStatusMsg(T.statusWriting);
       
       const polishStart = Date.now();
       const finalResponse = await ai.models.generateContent({
         model: GEMINI_MODEL,
-        contents: `${prompts.polish}\n\nDRAFT:\n${textToPolish}`,
+        contents: `${prompts.polish}\n\nTEXT TO POLISH:\n${consolidatedText}`,
         config: { systemInstruction: prompts.systemInstruction }
       });
+      
       const polishDuration = ((Date.now() - polishStart) / 1000).toFixed(1);
-      
       const finalText = finalResponse.text || "";
-      setFinalSummary(finalText);
-      const usage = finalResponse.usageMetadata?.totalTokenCount || 0;
-      setSessionTokens(prev => prev + usage);
+      const usagePolish = finalResponse.usageMetadata?.totalTokenCount || 0;
+      setSessionTokens(prev => prev + usagePolish);
 
-      addLog(`[${T.step3}] Done (${polishDuration}s).`, 'success');
+      setFinalSummary(finalText);
+      addLog(`[${T.step3}] Finished (${polishDuration}s).`, 'success');
       
-      const totalTime = ((Date.now() - (startTime || 0)) / 1000).toFixed(1);
-      addLog(`System: Cycle finished in ${totalTime}s.`, 'success');
-      
-      // Save to History
+      // Save
       const newHistoryItem: HistoryItem = {
         id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
         timestamp: Date.now(),
@@ -335,12 +245,10 @@ const App = () => {
         language: language,
         summary: finalText,
         model: GEMINI_MODEL,
-        tokenUsage: usage // approximate usage of last step, real usage is harder to track perfectly per item without state drift
+        tokenUsage: usagePolish // Approximation
       };
       
-      // Update history state (which updates localStorage via useEffect)
       setHistory(prev => [newHistoryItem, ...prev]);
-
       setProcessingState(ProcessingState.COMPLETED);
       setCurrentStatusMsg("");
       setProgress(100);
@@ -353,7 +261,7 @@ const App = () => {
     }
   };
 
-  // --- History & Export Logic ---
+  // --- History Logic ---
 
   const handleDeleteHistory = (id: string) => {
     if (confirm(T.delete + "?")) {
@@ -371,7 +279,7 @@ const App = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `aibooksum_backup_${new Date().toISOString().slice(0,10)}.json`;
+    a.download = `aibooksum_export_${new Date().toISOString().slice(0,10)}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -386,9 +294,7 @@ const App = () => {
     reader.onload = (event) => {
       try {
         const json = JSON.parse(event.target?.result as string) as BackupFile;
-        // Basic validation
         if (json.version && Array.isArray(json.items)) {
-          // Merge strategy: Prevent duplicates by ID
           setHistory(prev => {
             const existingIds = new Set(prev.map(i => i.id));
             const newItems = json.items.filter(i => !existingIds.has(i.id));
@@ -396,18 +302,15 @@ const App = () => {
           });
           alert(T.restoreMsg);
         } else {
-          alert("Invalid backup file format");
+          alert("Invalid JSON format");
         }
       } catch (err) {
-        alert("Error parsing backup file");
+        alert("Error parsing JSON");
       }
     };
     reader.readAsText(file);
-    // Reset input
     e.target.value = '';
   };
-
-  // --- Display Helpers ---
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -432,83 +335,16 @@ const App = () => {
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  const renderAuthScreen = () => (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-neutral-950 font-sans">
-      <div className="absolute top-4 right-4 z-20">
-        <select 
-          value={language} 
-          onChange={(e) => handleLanguageChange(e.target.value as Language)}
-          className="bg-neutral-800 text-gray-300 text-xs px-2 py-1 rounded border border-neutral-700 outline-none"
-        >
-          <option value="EN">English</option>
-          <option value="RU">Русский</option>
-          <option value="ES">Español</option>
-          <option value="DE">Deutsch</option>
-          <option value="FR">Français</option>
-        </select>
-      </div>
+  // --- Render ---
 
-      <div className="bg-neutral-900 border border-neutral-800 p-8 rounded-2xl max-w-md w-full shadow-2xl relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 opacity-50"></div>
-        <h1 className="text-3xl font-serif font-bold text-white mb-2 text-center">{T.loginTitle}</h1>
-        <p className="text-gray-400 text-center mb-8 text-sm leading-relaxed">
-          {T.loginSubtitle}
-        </p>
-        
-        <div className="space-y-4">
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">API Key</label>
-            <input 
-              type="password" 
-              placeholder={T.inputPlaceholder}
-              disabled={isVerifying}
-              className={`w-full bg-black border border-neutral-700 rounded-lg px-4 py-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all placeholder-neutral-600 ${isVerifying ? 'opacity-50 cursor-wait' : ''}`}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleSaveKey(e.currentTarget.value);
-              }}
-            />
-          </div>
-          
-          <button 
-            onClick={(e) => {
-              const input = e.currentTarget.parentElement?.querySelector('input');
-              if (input) handleSaveKey(input.value);
-            }}
-            disabled={isVerifying}
-            className={`w-full bg-white hover:bg-gray-100 text-black font-bold py-3 rounded-lg transition-all transform active:scale-[0.98] ${isVerifying ? 'opacity-50 cursor-wait' : ''}`}
-          >
-            {isVerifying ? T.verifying : T.loginButton}
-          </button>
-        </div>
-
-        <div className="mt-6 text-center text-xs text-gray-500">
-          <p>{T.noKey}</p>
-          <a 
-            href="https://aistudio.google.com/app/apikey" 
-            target="_blank" 
-            rel="noreferrer"
-            className="text-indigo-400 hover:text-indigo-300 underline mt-1 inline-block"
-          >
-            {T.getKeyLink}
-          </a>
-        </div>
-      </div>
-    </div>
-  );
-
-  if (showAuthScreen) return renderAuthScreen();
-
-  // --- Main App Render ---
   return (
     <div className="min-h-screen p-4 md:p-8 max-w-4xl mx-auto font-sans pb-20">
       
-      {/* Header (Responsive) */}
+      {/* Header */}
       <header className="mb-8 flex flex-col md:flex-row justify-between items-center md:items-start gap-4 md:gap-8">
         <div className="text-center md:text-left order-2 md:order-1">
            <h1 className="text-3xl font-serif font-bold text-white mb-2 tracking-tight">{T.title}</h1>
            <p className="text-gray-400 text-sm">{T.subtitle}</p>
-           
-           {/* Session Token Stats */}
            {sessionTokens > 0 && (
             <div className="mt-2 inline-flex items-center gap-2">
                 <span className="text-[10px] uppercase tracking-wide text-indigo-400 bg-indigo-900/20 px-2 py-0.5 rounded border border-indigo-900/50">
@@ -534,13 +370,6 @@ const App = () => {
                 <option value="DE">DE</option>
                 <option value="FR">FR</option>
             </select>
-
-            <button 
-                onClick={handleLogout}
-                className="text-xs text-neutral-500 hover:text-white transition-colors border border-neutral-800 px-3 py-1.5 rounded hover:bg-neutral-800 whitespace-nowrap"
-            >
-                {T.logout}
-            </button>
           </div>
         </div>
       </header>
@@ -561,10 +390,10 @@ const App = () => {
         </button>
       </div>
 
-      {/* VIEW: ANALYZE */}
+      {/* TAB: ANALYZE */}
       {activeTab === 'analyze' && (
         <div className="animate-fade-in">
-          {/* File Upload / Status */}
+          {/* File Upload */}
           <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-8 mb-6 text-center transition-all hover:border-neutral-700 relative overflow-hidden group">
             <input
               type="file"
@@ -612,8 +441,6 @@ const App = () => {
               <div className="flex justify-between items-center mb-4 border-b border-neutral-800 pb-2">
                 <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
                     <h2 className="text-xs font-bold text-gray-400 uppercase tracking-widest">{T.logs}</h2>
-                    
-                    {/* Pulsing Status Indicator */}
                     {currentStatusMsg && (
                          <div className="flex items-center gap-2 bg-indigo-500/10 px-2 py-1 rounded text-indigo-400 text-xs font-medium border border-indigo-500/20">
                             <span className="relative flex h-2 w-2">
@@ -624,11 +451,9 @@ const App = () => {
                          </div>
                     )}
                 </div>
-                
                 <span className="text-xs text-indigo-400 font-mono font-bold whitespace-nowrap">{progress}%</span>
               </div>
               
-              {/* Timer Bar */}
               {processingState !== ProcessingState.IDLE && processingState !== ProcessingState.COMPLETED && processingState !== ProcessingState.ERROR && (
                 <div className="mb-3 text-xs font-mono text-gray-500 bg-black/20 px-3 py-2 rounded flex justify-between">
                     <span>{T.timeElapsed}: <span className="text-white">{formatTime(elapsedSeconds)}</span></span>
@@ -656,7 +481,7 @@ const App = () => {
             </div>
           )}
 
-          {/* Active Result View */}
+          {/* Final Result */}
           {finalSummary && (
             <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-8 shadow-2xl relative">
                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 to-teal-500"></div>
@@ -689,10 +514,9 @@ const App = () => {
         </div>
       )}
 
-      {/* VIEW: HISTORY */}
+      {/* TAB: HISTORY */}
       {activeTab === 'history' && (
         <div className="animate-fade-in space-y-6">
-            {/* Toolbar */}
             <div className="flex justify-end gap-3 mb-4">
                 <input 
                     type="file" 
@@ -730,14 +554,13 @@ const App = () => {
                                     <div className="flex gap-3 text-xs text-gray-500">
                                         <span>{new Date(item.timestamp).toLocaleString()}</span>
                                         <span className="px-1.5 py-0.5 bg-neutral-800 rounded">{item.language}</span>
-                                        {item.tokenUsage > 0 && <span>Tokens: {item.tokenUsage}</span>}
                                     </div>
                                 </div>
                                 <div className="flex gap-2">
                                     <button 
                                         onClick={() => {
                                             setFinalSummary(item.summary);
-                                            setFile({ name: item.fileName } as File); // Mock file for display context
+                                            setFile({ name: item.fileName } as File);
                                             setActiveTab('analyze');
                                             setProcessingState(ProcessingState.COMPLETED);
                                         }}
