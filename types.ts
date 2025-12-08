@@ -8,6 +8,8 @@ export enum ProcessingState {
   ERROR = 'ERROR'
 }
 
+export type Language = 'EN' | 'RU' | 'ES' | 'DE' | 'FR';
+
 export interface LogEntry {
   id: string;
   timestamp: Date;
