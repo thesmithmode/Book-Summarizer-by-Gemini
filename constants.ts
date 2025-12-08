@@ -1,10 +1,10 @@
 import { Language } from "./types";
 
-export const CHUNK_SIZE = 300000; // ~75-80k tokens
+export const CHUNK_SIZE = 300000; // ~75-80k tokens context window optimization
 export const MAX_CONCURRENT_REQUESTS = 1;
 export const GEMINI_MODEL = 'gemini-3-pro-preview';
 
-// UI Dictionary
+// UI Dictionary with translations for all features
 export const UI_TEXT: Record<Language, any> = {
   EN: {
     title: "AI Book Summarizer",
@@ -36,7 +36,19 @@ export const UI_TEXT: Record<Language, any> = {
     error: "Error",
     criticalError: "Critical Error",
     tokenUsage: "Session Token Usage",
-    checkQuota: "Check Google Quota"
+    checkQuota: "Check Google Quota",
+    // New History & Tabs
+    tabAnalyze: "Analyze",
+    tabHistory: "History",
+    historyEmpty: "No summaries found yet.",
+    import: "Import JSON",
+    export: "Export Backup",
+    delete: "Delete",
+    view: "View",
+    restoreMsg: "History imported successfully",
+    statusThinking: "AI is thinking...",
+    statusReading: "Reading document structure...",
+    statusWriting: "Writing summary..."
   },
   RU: {
     title: "AI Book Summarizer",
@@ -68,7 +80,19 @@ export const UI_TEXT: Record<Language, any> = {
     error: "Ошибка",
     criticalError: "Критическая ошибка",
     tokenUsage: "Токенов за сессию",
-    checkQuota: "Проверить квоты Google"
+    checkQuota: "Проверить квоты Google",
+    // New History & Tabs
+    tabAnalyze: "Анализ",
+    tabHistory: "История",
+    historyEmpty: "История пуста.",
+    import: "Импорт JSON",
+    export: "Экспорт Бэкапа",
+    delete: "Удалить",
+    view: "Открыть",
+    restoreMsg: "История успешно восстановлена",
+    statusThinking: "Нейросеть думает...",
+    statusReading: "Анализ структуры документа...",
+    statusWriting: "Написание резюме..."
   },
   ES: {
     title: "Resumidor de Libros IA",
@@ -100,7 +124,19 @@ export const UI_TEXT: Record<Language, any> = {
     error: "Error",
     criticalError: "Error Crítico",
     tokenUsage: "Uso de Tokens",
-    checkQuota: "Verificar Cuota"
+    checkQuota: "Verificar Cuota",
+    // New History & Tabs
+    tabAnalyze: "Analizar",
+    tabHistory: "Historial",
+    historyEmpty: "No hay historial.",
+    import: "Importar JSON",
+    export: "Exportar Copia",
+    delete: "Borrar",
+    view: "Ver",
+    restoreMsg: "Historial restaurado",
+    statusThinking: "IA pensando...",
+    statusReading: "Leyendo estructura...",
+    statusWriting: "Escribiendo resumen..."
   },
   DE: {
     title: "AI Buch-Zusammenfasser",
@@ -132,7 +168,19 @@ export const UI_TEXT: Record<Language, any> = {
     error: "Fehler",
     criticalError: "Kritischer Fehler",
     tokenUsage: "Token-Verbrauch",
-    checkQuota: "Quote prüfen"
+    checkQuota: "Quote prüfen",
+    // New History & Tabs
+    tabAnalyze: "Analysieren",
+    tabHistory: "Verlauf",
+    historyEmpty: "Kein Verlauf.",
+    import: "JSON Importieren",
+    export: "Backup Exportieren",
+    delete: "Löschen",
+    view: "Ansehen",
+    restoreMsg: "Verlauf wiederhergestellt",
+    statusThinking: "KI denkt...",
+    statusReading: "Lese Struktur...",
+    statusWriting: "Schreibe Zusammenfassung..."
   },
   FR: {
     title: "Résumeur de Livres IA",
@@ -164,11 +212,23 @@ export const UI_TEXT: Record<Language, any> = {
     error: "Erreur",
     criticalError: "Erreur Critique",
     tokenUsage: "Usage des jetons",
-    checkQuota: "Vérifier quota"
+    checkQuota: "Vérifier quota",
+    // New History & Tabs
+    tabAnalyze: "Analyser",
+    tabHistory: "Historique",
+    historyEmpty: "Historique vide.",
+    import: "Importer JSON",
+    export: "Exporter",
+    delete: "Supprimer",
+    view: "Voir",
+    restoreMsg: "Historique restauré",
+    statusThinking: "IA réfléchit...",
+    statusReading: "Lecture de la structure...",
+    statusWriting: "Rédaction..."
   }
 };
 
-// Prompts Generation Function
+// Prompts Generation Function - Crucial for language direction
 export const getPrompts = (lang: Language) => {
   const langNameMap = {
     EN: "ENGLISH",
@@ -181,6 +241,7 @@ export const getPrompts = (lang: Language) => {
   const targetLang = langNameMap[lang];
 
   return {
+    // System instruction enforces language and persona
     systemInstruction: `You are a professional book editor and summarizer. Your output language must be STRICTLY ${targetLang}. Never use other languages unless explicitly asked to translate.`,
     
     extract: `

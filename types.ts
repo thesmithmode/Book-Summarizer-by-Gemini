@@ -28,3 +28,21 @@ export interface ProcessedBook {
   finalSummary: string;
   rawSummaries: string[];
 }
+
+// --- History & Backup Types ---
+
+export interface HistoryItem {
+  id: string;
+  timestamp: number;
+  fileName: string;
+  language: Language;
+  summary: string;
+  model: string;
+  tokenUsage: number;
+}
+
+export interface BackupFile {
+  version: number;
+  createdAt: number;
+  items: HistoryItem[];
+}

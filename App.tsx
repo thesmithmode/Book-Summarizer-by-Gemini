@@ -8,7 +8,7 @@ import {
   UI_TEXT,
   getPrompts
 } from './constants';
-import { LogEntry, ProcessingState, Language } from './types';
+import { LogEntry, ProcessingState, Language, HistoryItem, BackupFile } from './types';
 
 // Inject marked from global scope
 declare const marked: any;
@@ -22,11 +22,16 @@ const App = () => {
   const [showAuthScreen, setShowAuthScreen] = useState<boolean>(true);
 
   // App State
+  const [activeTab, setActiveTab] = useState<'analyze' | 'history'>('analyze');
   const [file, setFile] = useState<File | null>(null);
   const [processingState, setProcessingState] = useState<ProcessingState>(ProcessingState.IDLE);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [finalSummary, setFinalSummary] = useState<string>("");
   const [progress, setProgress] = useState(0);
+  const [currentStatusMsg, setCurrentStatusMsg] = useState<string>(""); // For pulsing status
+
+  // History State
+  const [history, setHistory] = useState<HistoryItem[]>([]);
   
   // Stats
   const [startTime, setStartTime] = useState<number | null>(null);
@@ -35,24 +40,42 @@ const App = () => {
   const [sessionTokens, setSessionTokens] = useState<number>(0);
 
   const logEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null); // For history import
 
   // Text Helper
   const T = UI_TEXT[language];
 
-  // Check LocalStorage on load
+  // --- Initialization & Persistance ---
+
   useEffect(() => {
+    // 1. Recover API Key
     const storedKey = localStorage.getItem("gemini_api_key");
     if (storedKey) {
       setApiKey(storedKey);
       setShowAuthScreen(false);
     }
     
-    // Check stored language preference
+    // 2. Recover Language
     const storedLang = localStorage.getItem("app_language");
     if (storedLang && ['EN','RU','ES','DE','FR'].includes(storedLang)) {
       setLanguage(storedLang as Language);
     }
+
+    // 3. Recover History
+    try {
+      const storedHistory = localStorage.getItem("summary_history");
+      if (storedHistory) {
+        setHistory(JSON.parse(storedHistory));
+      }
+    } catch (e) {
+      console.error("Failed to load history", e);
+    }
   }, []);
+
+  // Save history whenever it changes
+  useEffect(() => {
+    localStorage.setItem("summary_history", JSON.stringify(history));
+  }, [history]);
 
   // Auto scroll logs
   useEffect(() => {
@@ -78,6 +101,8 @@ const App = () => {
     return () => clearInterval(interval);
   }, [processingState, startTime, progress]);
 
+  // --- Handlers ---
+
   const handleLanguageChange = (lang: Language) => {
     setLanguage(lang);
     localStorage.setItem("app_language", lang);
@@ -94,6 +119,7 @@ const App = () => {
   };
 
   const handleLogout = () => {
+    // We do NOT clear history on logout, only the key
     localStorage.removeItem("gemini_api_key");
     setApiKey("");
     setShowAuthScreen(true);
@@ -101,12 +127,7 @@ const App = () => {
     setFinalSummary("");
     setLogs([]);
     setSessionTokens(0);
-  };
-
-  const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    setActiveTab('analyze');
   };
 
   const addLog = (message: string, type: LogEntry['type'] = 'info') => {
@@ -118,6 +139,8 @@ const App = () => {
     }]);
   };
 
+  // --- Core Logic: Processing ---
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       setFile(e.target.files[0]);
@@ -128,6 +151,7 @@ const App = () => {
       setStartTime(null);
       setElapsedSeconds(0);
       setEstimatedTotalSeconds(null);
+      setCurrentStatusMsg("");
     }
   };
 
@@ -135,10 +159,13 @@ const App = () => {
     if (!file || !apiKey) return;
 
     try {
+      // Init Stats
       setStartTime(Date.now());
       setProcessingState(ProcessingState.PARSING);
+      setCurrentStatusMsg(T.statusReading);
       addLog(`System: ${T.fileParsed} ${file.name}...`);
       
+      // 1. Parsing
       const parseStart = Date.now();
       const text = await parseFile(file);
       const parseDuration = ((Date.now() - parseStart) / 1000).toFixed(2);
@@ -148,7 +175,9 @@ const App = () => {
         throw new Error("Text too short. File might be empty or encrypted.");
       }
 
+      // 2. Chunking
       setProcessingState(ProcessingState.CHUNKING);
+      setCurrentStatusMsg(T.chunking);
       const chunks: string[] = [];
       for (let i = 0; i < text.length; i += CHUNK_SIZE) {
         chunks.push(text.slice(i, i + CHUNK_SIZE));
@@ -157,12 +186,14 @@ const App = () => {
       const isSingleChunk = chunks.length === 1;
       addLog(`${T.chunking}: ${chunks.length} parts (~${(CHUNK_SIZE / 1000).toFixed(0)}k ${T.chars}).`);
 
-      // Initialize AI with current key and prompts
+      // Initialize AI
+      // CRITICAL: New instance to ensure key is fresh
       const ai = new GoogleGenAI({ apiKey: apiKey });
       const prompts = getPrompts(language);
       
-      // --- STEP 1: EXTRACTION ---
+      // 3. Extraction (Step 1)
       setProcessingState(ProcessingState.SUMMARIZING);
+      setCurrentStatusMsg(T.statusThinking);
       const extractedSummaries: string[] = new Array(chunks.length).fill("");
       
       for (let i = 0; i < chunks.length; i += MAX_CONCURRENT_REQUESTS) {
@@ -193,6 +224,7 @@ const App = () => {
                  throw new Error("Invalid API Key or Access Denied.");
             }
             addLog(`[${T.error}] Part ${actualIdx + 1}: ${err.message}. Retrying...`, 'warning');
+            // In a real app we might retry here, but for now we return empty to not crash the whole chain
             return { idx: actualIdx, text: "" };
           }
         });
@@ -212,12 +244,13 @@ const App = () => {
          throw new Error("Failed to extract any text.");
       }
 
-      // --- STEP 2: CONSOLIDATION ---
+      // 4. Consolidation (Step 2)
       let textToPolish = combinedDraft;
       
       if (!isSingleChunk) {
         addLog(`[${T.step2}] Consolidating ${chunks.length} parts...`);
-        setProcessingState(ProcessingState.POLISHING);
+        setProcessingState(ProcessingState.POLISHING); // Re-use styling
+        setCurrentStatusMsg(T.statusThinking);
         
         const consolidateStart = Date.now();
         const consolidatedResponse = await ai.models.generateContent({
@@ -238,9 +271,10 @@ const App = () => {
         addLog(`[${T.step2}] Skipped (single part).`);
       }
 
-      // --- STEP 3: POLISHING ---
+      // 5. Polishing (Step 3)
       addLog(`[${T.step3}] Final structuring...`);
       setProcessingState(ProcessingState.POLISHING);
+      setCurrentStatusMsg(T.statusWriting);
       
       const polishStart = Date.now();
       const finalResponse = await ai.models.generateContent({
@@ -260,248 +294,440 @@ const App = () => {
       const totalTime = ((Date.now() - (startTime || 0)) / 1000).toFixed(1);
       addLog(`System: Cycle finished in ${totalTime}s.`, 'success');
       
+      // Save to History
+      const newHistoryItem: HistoryItem = {
+        id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+        timestamp: Date.now(),
+        fileName: file.name,
+        language: language,
+        summary: finalText,
+        model: GEMINI_MODEL,
+        tokenUsage: usage // approximate usage of last step, real usage is harder to track perfectly per item without state drift
+      };
+      
+      // Update history state (which updates localStorage via useEffect)
+      setHistory(prev => [newHistoryItem, ...prev]);
+
       setProcessingState(ProcessingState.COMPLETED);
+      setCurrentStatusMsg("");
       setProgress(100);
 
     } catch (error: any) {
       console.error(error);
       addLog(`[${T.criticalError}] ${error.message}`, 'error');
       setProcessingState(ProcessingState.ERROR);
+      setCurrentStatusMsg(T.error);
     }
   };
 
-  const copyToClipboard = () => {
-    navigator.clipboard.writeText(finalSummary);
-    addLog(T.copySuccess, 'info');
+  // --- History & Export Logic ---
+
+  const handleDeleteHistory = (id: string) => {
+    if (confirm(T.delete + "?")) {
+      setHistory(prev => prev.filter(item => item.id !== id));
+    }
   };
 
-  const downloadMarkdown = () => {
-    const blob = new Blob([finalSummary], { type: 'text/markdown' });
+  const handleExportBackup = () => {
+    const backup: BackupFile = {
+      version: 1,
+      createdAt: Date.now(),
+      items: history
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `summary_${file?.name || 'book'}_${language}.md`;
+    a.download = `aibooksum_backup_${new Date().toISOString().slice(0,10)}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
 
-  // --- Auth Screen ---
-  if (showAuthScreen) {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-4 bg-neutral-950 font-sans">
-        <div className="absolute top-4 right-4 z-20">
-          <select 
-            value={language} 
-            onChange={(e) => handleLanguageChange(e.target.value as Language)}
-            className="bg-neutral-800 text-gray-300 text-xs px-2 py-1 rounded border border-neutral-700 outline-none"
-          >
-            <option value="EN">English</option>
-            <option value="RU">Русский</option>
-            <option value="ES">Español</option>
-            <option value="DE">Deutsch</option>
-            <option value="FR">Français</option>
-          </select>
-        </div>
+  const handleImportBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-        <div className="bg-neutral-900 border border-neutral-800 p-8 rounded-2xl max-w-md w-full shadow-2xl relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 opacity-50"></div>
-          <h1 className="text-3xl font-serif font-bold text-white mb-2 text-center">{T.loginTitle}</h1>
-          <p className="text-gray-400 text-center mb-8 text-sm leading-relaxed">
-            {T.loginSubtitle}
-          </p>
-          
-          <div className="space-y-4">
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">API Key</label>
-              <input 
-                type="password" 
-                placeholder={T.inputPlaceholder}
-                className="w-full bg-black border border-neutral-700 rounded-lg px-4 py-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all placeholder-neutral-600"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleSaveKey(e.currentTarget.value);
-                }}
-              />
-            </div>
-            
-            <button 
-              onClick={(e) => {
-                const input = e.currentTarget.parentElement?.querySelector('input');
-                if (input) handleSaveKey(input.value);
-              }}
-              className="w-full bg-white hover:bg-gray-100 text-black font-bold py-3 rounded-lg transition-all transform active:scale-[0.98]"
-            >
-              {T.loginButton}
-            </button>
-          </div>
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const json = JSON.parse(event.target?.result as string) as BackupFile;
+        // Basic validation
+        if (json.version && Array.isArray(json.items)) {
+          // Merge strategy: Prevent duplicates by ID
+          setHistory(prev => {
+            const existingIds = new Set(prev.map(i => i.id));
+            const newItems = json.items.filter(i => !existingIds.has(i.id));
+            return [...newItems, ...prev].sort((a,b) => b.timestamp - a.timestamp);
+          });
+          alert(T.restoreMsg);
+        } else {
+          alert("Invalid backup file format");
+        }
+      } catch (err) {
+        alert("Error parsing backup file");
+      }
+    };
+    reader.readAsText(file);
+    // Reset input
+    e.target.value = '';
+  };
 
-          <div className="mt-6 text-center text-xs text-gray-500">
-            <p>{T.noKey}</p>
-            <a 
-              href="https://aistudio.google.com/app/apikey" 
-              target="_blank" 
-              rel="noreferrer"
-              className="text-indigo-400 hover:text-indigo-300 underline mt-1 inline-block"
-            >
-              {T.getKeyLink}
-            </a>
-          </div>
-        </div>
+  // --- Display Helpers ---
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    addLog(T.copySuccess, 'info');
+  };
+
+  const downloadMarkdown = (content: string, filename: string) => {
+    const blob = new Blob([content], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `summary_${filename}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const renderAuthScreen = () => (
+    <div className="min-h-screen flex items-center justify-center p-4 bg-neutral-950 font-sans">
+      <div className="absolute top-4 right-4 z-20">
+        <select 
+          value={language} 
+          onChange={(e) => handleLanguageChange(e.target.value as Language)}
+          className="bg-neutral-800 text-gray-300 text-xs px-2 py-1 rounded border border-neutral-700 outline-none"
+        >
+          <option value="EN">English</option>
+          <option value="RU">Русский</option>
+          <option value="ES">Español</option>
+          <option value="DE">Deutsch</option>
+          <option value="FR">Français</option>
+        </select>
       </div>
-    );
-  }
 
-  // --- Main App ---
-  return (
-    <div className="min-h-screen p-4 md:p-8 max-w-4xl mx-auto font-sans">
-      <header className="mb-8 flex flex-col items-center relative">
-        {/* Top Controls */}
-        <div className="absolute right-0 top-0 flex gap-2">
-           <select 
-            value={language} 
-            onChange={(e) => handleLanguageChange(e.target.value as Language)}
-            className="bg-neutral-900 text-gray-400 text-xs px-2 py-1 rounded border border-neutral-800 outline-none hover:border-neutral-600 transition-colors"
-          >
-            <option value="EN">EN</option>
-            <option value="RU">RU</option>
-            <option value="ES">ES</option>
-            <option value="DE">DE</option>
-            <option value="FR">FR</option>
-          </select>
-
+      <div className="bg-neutral-900 border border-neutral-800 p-8 rounded-2xl max-w-md w-full shadow-2xl relative overflow-hidden">
+        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 opacity-50"></div>
+        <h1 className="text-3xl font-serif font-bold text-white mb-2 text-center">{T.loginTitle}</h1>
+        <p className="text-gray-400 text-center mb-8 text-sm leading-relaxed">
+          {T.loginSubtitle}
+        </p>
+        
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">API Key</label>
+            <input 
+              type="password" 
+              placeholder={T.inputPlaceholder}
+              className="w-full bg-black border border-neutral-700 rounded-lg px-4 py-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all placeholder-neutral-600"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleSaveKey(e.currentTarget.value);
+              }}
+            />
+          </div>
+          
           <button 
-            onClick={handleLogout}
-            className="text-xs text-neutral-500 hover:text-white transition-colors border border-neutral-800 px-3 py-1 rounded hover:bg-neutral-800"
-            title={T.logout}
+            onClick={(e) => {
+              const input = e.currentTarget.parentElement?.querySelector('input');
+              if (input) handleSaveKey(input.value);
+            }}
+            className="w-full bg-white hover:bg-gray-100 text-black font-bold py-3 rounded-lg transition-all transform active:scale-[0.98]"
           >
-            Key
+            {T.loginButton}
           </button>
         </div>
 
-        <h1 className="text-3xl font-serif font-bold text-white mb-2 tracking-tight">{T.title}</h1>
-        <p className="text-gray-400 text-sm">{T.subtitle}</p>
-        
-        {/* Token Counter */}
-        {sessionTokens > 0 && (
-          <div className="mt-4 flex flex-col items-center gap-1">
-             <div className="text-xs font-mono text-indigo-400 bg-indigo-900/20 px-3 py-1 rounded-full border border-indigo-900/50">
-                {T.tokenUsage}: {sessionTokens.toLocaleString()}
-             </div>
-             <a href="https://console.cloud.google.com/apis/dashboard" target="_blank" rel="noreferrer" className="text-[10px] text-gray-600 hover:text-gray-400 underline">
-               {T.checkQuota}
-             </a>
+        <div className="mt-6 text-center text-xs text-gray-500">
+          <p>{T.noKey}</p>
+          <a 
+            href="https://aistudio.google.com/app/apikey" 
+            target="_blank" 
+            rel="noreferrer"
+            className="text-indigo-400 hover:text-indigo-300 underline mt-1 inline-block"
+          >
+            {T.getKeyLink}
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+
+  if (showAuthScreen) return renderAuthScreen();
+
+  // --- Main App Render ---
+  return (
+    <div className="min-h-screen p-4 md:p-8 max-w-4xl mx-auto font-sans pb-20">
+      
+      {/* Header (Responsive) */}
+      <header className="mb-8 flex flex-col md:flex-row justify-between items-center md:items-start gap-4 md:gap-8">
+        <div className="text-center md:text-left order-2 md:order-1">
+           <h1 className="text-3xl font-serif font-bold text-white mb-2 tracking-tight">{T.title}</h1>
+           <p className="text-gray-400 text-sm">{T.subtitle}</p>
+           
+           {/* Session Token Stats */}
+           {sessionTokens > 0 && (
+            <div className="mt-2 inline-flex items-center gap-2">
+                <span className="text-[10px] uppercase tracking-wide text-indigo-400 bg-indigo-900/20 px-2 py-0.5 rounded border border-indigo-900/50">
+                    {T.tokenUsage}: {sessionTokens.toLocaleString()}
+                </span>
+                <a href="https://console.cloud.google.com/apis/dashboard" target="_blank" rel="noreferrer" className="text-[10px] text-gray-600 hover:text-gray-400 underline">
+                 {T.checkQuota}
+                </a>
+            </div>
+           )}
+        </div>
+
+        <div className="flex flex-col items-end gap-2 order-1 md:order-2 w-full md:w-auto">
+          <div className="flex gap-2 w-full justify-end">
+            <select 
+                value={language} 
+                onChange={(e) => handleLanguageChange(e.target.value as Language)}
+                className="bg-neutral-900 text-gray-400 text-xs px-2 py-1.5 rounded border border-neutral-800 outline-none hover:border-neutral-600 transition-colors"
+            >
+                <option value="EN">EN</option>
+                <option value="RU">RU</option>
+                <option value="ES">ES</option>
+                <option value="DE">DE</option>
+                <option value="FR">FR</option>
+            </select>
+
+            <button 
+                onClick={handleLogout}
+                className="text-xs text-neutral-500 hover:text-white transition-colors border border-neutral-800 px-3 py-1.5 rounded hover:bg-neutral-800 whitespace-nowrap"
+            >
+                {T.logout}
+            </button>
           </div>
-        )}
+        </div>
       </header>
 
-      {/* File Upload Section */}
-      <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-8 mb-6 text-center transition-all hover:border-neutral-700 relative overflow-hidden group">
-        <input
-          type="file"
-          id="fileInput"
-          accept=".pdf,.epub,.fb2,.xml,.txt"
-          onChange={handleFileChange}
-          className="hidden"
-          disabled={processingState !== ProcessingState.IDLE && processingState !== ProcessingState.COMPLETED && processingState !== ProcessingState.ERROR}
-        />
-        <label
-          htmlFor="fileInput"
-          className={`inline-flex items-center justify-center px-8 py-3 border border-transparent text-sm font-bold uppercase tracking-wider rounded-lg text-black bg-white transition-all 
-            ${(processingState !== ProcessingState.IDLE && processingState !== ProcessingState.COMPLETED && processingState !== ProcessingState.ERROR) 
-              ? 'opacity-50 cursor-not-allowed' 
-              : 'hover:bg-gray-200 cursor-pointer shadow-lg hover:shadow-xl hover:-translate-y-0.5'}`}
+      {/* Tabs */}
+      <div className="flex border-b border-neutral-800 mb-6">
+        <button 
+          onClick={() => setActiveTab('analyze')}
+          className={`px-6 py-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'analyze' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-500 hover:text-gray-300'}`}
         >
-          {file ? T.changeFile : T.selectFile}
-        </label>
-        
-        {file && (
-          <div className="mt-6 text-gray-300 z-10 relative animate-fade-in-up">
-            <div className="inline-block p-4 bg-black/30 rounded-lg border border-neutral-800">
-                <p className="font-serif text-lg text-white">{file.name}</p>
-                <p className="text-xs text-gray-500 uppercase mt-1">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
-            </div>
+          {T.tabAnalyze}
+        </button>
+        <button 
+           onClick={() => setActiveTab('history')}
+           className={`px-6 py-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'history' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-500 hover:text-gray-300'}`}
+        >
+          {T.tabHistory} <span className="ml-1 text-xs opacity-50 bg-neutral-800 px-1.5 py-0.5 rounded-full">{history.length}</span>
+        </button>
+      </div>
+
+      {/* VIEW: ANALYZE */}
+      {activeTab === 'analyze' && (
+        <div className="animate-fade-in">
+          {/* File Upload / Status */}
+          <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-8 mb-6 text-center transition-all hover:border-neutral-700 relative overflow-hidden group">
+            <input
+              type="file"
+              id="fileInput"
+              accept=".pdf,.epub,.fb2,.xml,.txt"
+              onChange={handleFileChange}
+              className="hidden"
+              disabled={processingState !== ProcessingState.IDLE && processingState !== ProcessingState.COMPLETED && processingState !== ProcessingState.ERROR}
+            />
             
-            {processingState === ProcessingState.IDLE && (
-              <div className="mt-6">
-                <button
-                    onClick={processBook}
-                    className="px-8 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-lg font-bold transition-all shadow-lg hover:shadow-indigo-500/25 active:scale-95"
-                >
-                    {T.startAnalysis}
-                </button>
+            <label
+              htmlFor="fileInput"
+              className={`inline-flex items-center justify-center px-8 py-3 border border-transparent text-sm font-bold uppercase tracking-wider rounded-lg text-black bg-white transition-all 
+                ${(processingState !== ProcessingState.IDLE && processingState !== ProcessingState.COMPLETED && processingState !== ProcessingState.ERROR) 
+                  ? 'opacity-50 cursor-not-allowed' 
+                  : 'hover:bg-gray-200 cursor-pointer shadow-lg hover:shadow-xl hover:-translate-y-0.5'}`}
+            >
+              {file ? T.changeFile : T.selectFile}
+            </label>
+            
+            {file && (
+              <div className="mt-6 text-gray-300 z-10 relative">
+                <div className="inline-block p-4 bg-black/30 rounded-lg border border-neutral-800">
+                    <p className="font-serif text-lg text-white">{file.name}</p>
+                    <p className="text-xs text-gray-500 uppercase mt-1">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                </div>
+                
+                {processingState === ProcessingState.IDLE && (
+                  <div className="mt-6">
+                    <button
+                        onClick={processBook}
+                        className="px-8 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-lg font-bold transition-all shadow-lg hover:shadow-indigo-500/25 active:scale-95"
+                    >
+                        {T.startAnalysis}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
-        )}
-      </div>
 
-      {/* Progress & Logs Section */}
-      {(processingState !== ProcessingState.IDLE || logs.length > 0) && (
-        <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6 mb-6 shadow-lg">
-          <div className="flex justify-between items-center mb-4 border-b border-neutral-800 pb-2">
-            <div className="flex items-center gap-4">
-                <h2 className="text-xs font-bold text-gray-400 uppercase tracking-widest">{T.logs}</h2>
-                {processingState !== ProcessingState.IDLE && processingState !== ProcessingState.COMPLETED && processingState !== ProcessingState.ERROR && (
-                    <div className="text-xs font-mono text-gray-500 bg-neutral-800 px-2 py-1 rounded hidden sm:flex gap-2">
-                        <span>{T.timeElapsed}: <span className="text-white">{formatTime(elapsedSeconds)}</span></span>
-                        {estimatedTotalSeconds !== null && (
-                            <span className="pl-2 border-l border-neutral-700">
-                                {T.timeRem}: <span className="text-white">{formatTime(Math.max(0, estimatedTotalSeconds - elapsedSeconds))}</span>
+          {/* Progress & Logs */}
+          {(processingState !== ProcessingState.IDLE || logs.length > 0) && (
+            <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6 mb-6 shadow-lg">
+              <div className="flex justify-between items-center mb-4 border-b border-neutral-800 pb-2">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+                    <h2 className="text-xs font-bold text-gray-400 uppercase tracking-widest">{T.logs}</h2>
+                    
+                    {/* Pulsing Status Indicator */}
+                    {currentStatusMsg && (
+                         <div className="flex items-center gap-2 bg-indigo-500/10 px-2 py-1 rounded text-indigo-400 text-xs font-medium border border-indigo-500/20">
+                            <span className="relative flex h-2 w-2">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
                             </span>
-                        )}
-                    </div>
-                )}
-            </div>
-            <span className="text-xs text-indigo-400 font-mono font-bold">{progress}%</span>
-          </div>
-          
-          <div className="h-56 overflow-y-auto font-mono text-xs space-y-2 pr-2 custom-scrollbar bg-black/40 p-4 rounded-lg border border-neutral-800/50">
-            {logs.map((log) => (
-              <div key={log.id} className={`flex gap-3 leading-relaxed ${
-                log.type === 'error' ? 'text-red-400 bg-red-900/10 p-1 rounded' : 
-                log.type === 'success' ? 'text-green-400' : 
-                log.type === 'warning' ? 'text-amber-400' : 'text-gray-500'
-              }`}>
-                <span className="opacity-40 shrink-0 select-none">[{log.timestamp.toLocaleTimeString()}]</span>
-                <span>{log.message}</span>
+                            {currentStatusMsg}
+                         </div>
+                    )}
+                </div>
+                
+                <span className="text-xs text-indigo-400 font-mono font-bold whitespace-nowrap">{progress}%</span>
               </div>
-            ))}
-            <div ref={logEndRef} />
-          </div>
+              
+              {/* Timer Bar */}
+              {processingState !== ProcessingState.IDLE && processingState !== ProcessingState.COMPLETED && processingState !== ProcessingState.ERROR && (
+                <div className="mb-3 text-xs font-mono text-gray-500 bg-black/20 px-3 py-2 rounded flex justify-between">
+                    <span>{T.timeElapsed}: <span className="text-white">{formatTime(elapsedSeconds)}</span></span>
+                    {estimatedTotalSeconds !== null && (
+                        <span>
+                            {T.timeRem}: <span className="text-white">{formatTime(Math.max(0, estimatedTotalSeconds - elapsedSeconds))}</span>
+                        </span>
+                    )}
+                </div>
+              )}
+
+              <div className="h-56 overflow-y-auto font-mono text-xs space-y-2 pr-2 custom-scrollbar bg-black/40 p-4 rounded-lg border border-neutral-800/50">
+                {logs.map((log) => (
+                  <div key={log.id} className={`flex gap-3 leading-relaxed ${
+                    log.type === 'error' ? 'text-red-400 bg-red-900/10 p-1 rounded' : 
+                    log.type === 'success' ? 'text-green-400' : 
+                    log.type === 'warning' ? 'text-amber-400' : 'text-gray-500'
+                  }`}>
+                    <span className="opacity-40 shrink-0 select-none">[{log.timestamp.toLocaleTimeString()}]</span>
+                    <span>{log.message}</span>
+                  </div>
+                ))}
+                <div ref={logEndRef} />
+              </div>
+            </div>
+          )}
+
+          {/* Active Result View */}
+          {finalSummary && (
+            <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-8 shadow-2xl relative">
+                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 to-teal-500"></div>
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 border-b border-neutral-800 pb-6 gap-4">
+                <div>
+                  <h2 className="text-3xl font-serif text-white">{T.summaryTitle}</h2>
+                  <p className="text-sm text-gray-500 mt-2">{T.generatedBy}</p>
+                </div>
+                <div className="flex gap-3">
+                     <button
+                      onClick={() => downloadMarkdown(finalSummary, file?.name || 'book')}
+                      className="px-5 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-gray-200 text-sm font-medium rounded-lg transition-colors border border-neutral-700 flex items-center gap-2"
+                    >
+                      {T.download}
+                    </button>
+                    <button
+                      onClick={() => copyToClipboard(finalSummary)}
+                      className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors shadow-lg hover:shadow-indigo-500/20 flex items-center gap-2"
+                    >
+                      {T.copy}
+                    </button>
+                </div>
+              </div>
+              <div 
+                className="markdown-content text-gray-300 leading-7 text-sm md:text-base font-light"
+                dangerouslySetInnerHTML={{ __html: marked.parse(finalSummary) }}
+              />
+            </div>
+          )}
         </div>
       )}
 
-      {/* Result Section */}
-      {finalSummary && (
-        <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-8 shadow-2xl relative">
-            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 to-teal-500"></div>
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 border-b border-neutral-800 pb-6 gap-4">
-            <div>
-              <h2 className="text-3xl font-serif text-white">{T.summaryTitle}</h2>
-              <p className="text-sm text-gray-500 mt-2">{T.generatedBy}</p>
-            </div>
-            <div className="flex gap-3">
-                 <button
-                  onClick={downloadMarkdown}
-                  className="px-5 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-gray-200 text-sm font-medium rounded-lg transition-colors border border-neutral-700 flex items-center gap-2"
+      {/* VIEW: HISTORY */}
+      {activeTab === 'history' && (
+        <div className="animate-fade-in space-y-6">
+            {/* Toolbar */}
+            <div className="flex justify-end gap-3 mb-4">
+                <input 
+                    type="file" 
+                    ref={fileInputRef}
+                    accept=".json"
+                    className="hidden"
+                    onChange={handleImportBackup}
+                />
+                <button 
+                    onClick={() => fileInputRef.current?.click()}
+                    className="text-xs text-gray-400 hover:text-white border border-neutral-800 hover:bg-neutral-800 px-3 py-2 rounded transition-colors"
                 >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-                  {T.download}
+                    {T.import}
                 </button>
-                <button
-                  onClick={copyToClipboard}
-                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors shadow-lg hover:shadow-indigo-500/20 flex items-center gap-2"
+                <button 
+                    onClick={handleExportBackup}
+                    disabled={history.length === 0}
+                    className="text-xs text-indigo-400 hover:text-indigo-300 border border-indigo-900/50 hover:bg-indigo-900/20 px-3 py-2 rounded transition-colors disabled:opacity-50"
                 >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path></svg>
-                  {T.copy}
+                    {T.export}
                 </button>
             </div>
-          </div>
-          <div 
-            className="markdown-content text-gray-300 leading-7 text-sm md:text-base font-light"
-            dangerouslySetInnerHTML={{ __html: marked.parse(finalSummary) }}
-          />
+
+            {history.length === 0 ? (
+                <div className="text-center py-20 text-gray-600">
+                    <p>{T.historyEmpty}</p>
+                </div>
+            ) : (
+                <div className="grid gap-4">
+                    {history.map((item) => (
+                        <div key={item.id} className="bg-neutral-900 border border-neutral-800 rounded-lg p-5 hover:border-neutral-700 transition-colors">
+                            <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
+                                <div>
+                                    <h3 className="font-serif text-lg text-white mb-1">{item.fileName}</h3>
+                                    <div className="flex gap-3 text-xs text-gray-500">
+                                        <span>{new Date(item.timestamp).toLocaleString()}</span>
+                                        <span className="px-1.5 py-0.5 bg-neutral-800 rounded">{item.language}</span>
+                                        {item.tokenUsage > 0 && <span>Tokens: {item.tokenUsage}</span>}
+                                    </div>
+                                </div>
+                                <div className="flex gap-2">
+                                    <button 
+                                        onClick={() => {
+                                            setFinalSummary(item.summary);
+                                            setFile({ name: item.fileName } as File); // Mock file for display context
+                                            setActiveTab('analyze');
+                                            setProcessingState(ProcessingState.COMPLETED);
+                                        }}
+                                        className="px-3 py-1.5 bg-indigo-900/30 text-indigo-300 rounded hover:bg-indigo-900/50 text-xs font-medium border border-indigo-900/50"
+                                    >
+                                        {T.view}
+                                    </button>
+                                    <button 
+                                        onClick={() => downloadMarkdown(item.summary, item.fileName)}
+                                        className="px-3 py-1.5 bg-neutral-800 text-gray-400 rounded hover:bg-neutral-700 text-xs border border-neutral-700"
+                                    >
+                                        MD
+                                    </button>
+                                    <button 
+                                        onClick={() => handleDeleteHistory(item.id)}
+                                        className="px-3 py-1.5 text-red-400 hover:text-red-300 text-xs hover:bg-red-900/20 rounded"
+                                    >
+                                        {T.delete}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
         </div>
       )}
     </div>
