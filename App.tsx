@@ -16,6 +16,8 @@ declare const marked: any;
 const App = () => {
   // Config State
   const [language, setLanguage] = useState<Language>('EN');
+  // Use Ref to track language for async operations so we always use the latest selected language for generation
+  const languageRef = useRef<Language>('EN');
   
   // App State
   const [activeTab, setActiveTab] = useState<'analyze' | 'history'>('analyze');
@@ -47,6 +49,7 @@ const App = () => {
     const storedLang = localStorage.getItem("app_language");
     if (storedLang && ['EN','RU','ES','DE','FR'].includes(storedLang)) {
       setLanguage(storedLang as Language);
+      languageRef.current = storedLang as Language;
     }
 
     // Recover History
@@ -67,6 +70,11 @@ const App = () => {
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [logs]);
+
+  // Sync ref with state
+  useEffect(() => {
+    languageRef.current = language;
+  }, [language]);
 
   // Timer
   useEffect(() => {
@@ -147,7 +155,6 @@ const App = () => {
 
       // Initialize AI with Env Key
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const prompts = getPrompts(language);
       
       // 3. Extraction (Stage 1)
       setProcessingState(ProcessingState.SUMMARIZING);
@@ -157,6 +164,9 @@ const App = () => {
       for (let i = 0; i < chunks.length; i += MAX_CONCURRENT_REQUESTS) {
         const batch = chunks.slice(i, i + MAX_CONCURRENT_REQUESTS);
         
+        // Fetch latest prompts for this specific batch execution
+        const batchPrompts = getPrompts(languageRef.current);
+
         const batchPromises = batch.map(async (chunk, batchIdx) => {
           const actualIdx = i + batchIdx;
           const chunkStartTime = Date.now();
@@ -165,8 +175,8 @@ const App = () => {
           try {
             const response = await ai.models.generateContent({
               model: GEMINI_MODEL,
-              contents: `${prompts.extract}\n\nCONTENT PART ${actualIdx + 1}:\n${chunk}`,
-              config: { systemInstruction: prompts.systemInstruction }
+              contents: `${batchPrompts.extract}\n\nCONTENT PART ${actualIdx + 1}:\n${chunk}`,
+              config: { systemInstruction: batchPrompts.systemInstruction }
             });
 
             const duration = ((Date.now() - chunkStartTime) / 1000).toFixed(1);
@@ -197,17 +207,19 @@ const App = () => {
       if (combinedDraft.length === 0) throw new Error("Failed to extract any text.");
 
       // 4. Consolidation (Stage 2)
-      // Even if it's 1 chunk, we pass it through consolidation to ensure strict format if the first pass was messy
       setProcessingState(ProcessingState.POLISHING);
       setCurrentStatusMsg(T.statusThinking);
       
       addLog(`[${T.step2}] Consolidating ${chunks.length} parts...`);
       const consolidateStart = Date.now();
       
+      // Fetch latest prompts for consolidation
+      const consolidatePrompts = getPrompts(languageRef.current);
+
       const consolidatedResponse = await ai.models.generateContent({
         model: GEMINI_MODEL,
-        contents: `${prompts.consolidate}\n\nEXTRACTED DRAFTS:\n${combinedDraft}`,
-        config: { systemInstruction: prompts.systemInstruction }
+        contents: `${consolidatePrompts.consolidate}\n\nEXTRACTED DRAFTS:\n${combinedDraft}`,
+        config: { systemInstruction: consolidatePrompts.systemInstruction }
       });
       
       const consolidateDuration = ((Date.now() - consolidateStart) / 1000).toFixed(1);
@@ -223,10 +235,14 @@ const App = () => {
       setCurrentStatusMsg(T.statusWriting);
       
       const polishStart = Date.now();
+      
+      // Fetch latest prompts for final polish - this guarantees output is in currently selected language
+      const polishPrompts = getPrompts(languageRef.current);
+
       const finalResponse = await ai.models.generateContent({
         model: GEMINI_MODEL,
-        contents: `${prompts.polish}\n\nTEXT TO POLISH:\n${consolidatedText}`,
-        config: { systemInstruction: prompts.systemInstruction }
+        contents: `${polishPrompts.polish}\n\nTEXT TO POLISH:\n${consolidatedText}`,
+        config: { systemInstruction: polishPrompts.systemInstruction }
       });
       
       const polishDuration = ((Date.now() - polishStart) / 1000).toFixed(1);
@@ -242,7 +258,8 @@ const App = () => {
         id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
         timestamp: Date.now(),
         fileName: file.name,
-        language: language,
+        // Save the language that was used for the FINAL output
+        language: languageRef.current,
         summary: finalText,
         model: GEMINI_MODEL,
         tokenUsage: usagePolish // Approximation

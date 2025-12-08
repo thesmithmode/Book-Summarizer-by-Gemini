@@ -1,8 +1,7 @@
 import { Language } from "./types";
 
-// Drastically reduced chunk size to force detailed analysis (approx 10-15 pages per chunk)
-// This matches the user's "27 parts" preference for high fidelity.
-export const CHUNK_SIZE = 40000; 
+// Chunk size updated to 100,000 as requested for broader context per chunk
+export const CHUNK_SIZE = 100000; 
 export const MAX_CONCURRENT_REQUESTS = 1;
 export const GEMINI_MODEL = 'gemini-3-pro-preview';
 
