@@ -10,14 +10,127 @@ import {
 } from './constants';
 import { LogEntry, ProcessingState, Language, HistoryItem, BackupFile } from './types';
 
-// Inject marked from global scope
+// Inject marked and DOMPurify from global scope
 declare const marked: any;
+declare const DOMPurify: any;
+
+// --- Helper for smart text splitting ---
+const smartSplitText = (text: string, maxSize: number): string[] => {
+  const chunks: string[] = [];
+  let startIndex = 0;
+
+  while (startIndex < text.length) {
+    // Ideally we want to cut at maxSize
+    let endIndex = Math.min(startIndex + maxSize, text.length);
+
+    // If we are not at the very end of text, try to find a sentence boundary
+    if (endIndex < text.length) {
+      // Look back up to 5% of chunk size or max 5000 chars to find punctuation
+      const lookback = Math.min(5000, Math.floor(maxSize * 0.05));
+      const searchBuffer = text.slice(endIndex - lookback, endIndex);
+      
+      // Find last occurrence of punctuation followed by space or newline
+      // We look for: . ! ? or \n
+      const lastPeriod = searchBuffer.lastIndexOf('.');
+      const lastExcl = searchBuffer.lastIndexOf('!');
+      const lastQ = searchBuffer.lastIndexOf('?');
+      const lastNewline = searchBuffer.lastIndexOf('\n');
+
+      const bestSplitRelative = Math.max(lastPeriod, lastExcl, lastQ, lastNewline);
+
+      if (bestSplitRelative !== -1) {
+        // If we found a split point, adjust endIndex
+        // +1 because we want to include the punctuation mark in the current chunk
+        endIndex = (endIndex - lookback) + bestSplitRelative + 1;
+      }
+    }
+
+    const chunk = text.slice(startIndex, endIndex).trim();
+    if (chunk.length > 0) {
+      chunks.push(chunk);
+    }
+    
+    startIndex = endIndex;
+  }
+  
+  return chunks;
+};
+
+// --- Custom Components ---
+
+// 1. Custom Dropdown for Language
+// Strictly styled to match the width and curvature of the button.
+const LanguageDropdown = ({ 
+    current, 
+    onChange 
+}: { 
+    current: Language, 
+    onChange: (l: Language) => void 
+}) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const dropdownRef = useRef<HTMLDivElement>(null);
+
+    // Close on click outside
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+                setIsOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    const languages: Language[] = ['RU', 'EN', 'ES', 'DE', 'FR'];
+
+    // Shared width class for perfect alignment
+    const widthClass = "w-[90px]"; 
+
+    return (
+        <div className="relative h-full" ref={dropdownRef}>
+            {/* Trigger Button Container - Increased border opacity to 20% */}
+            <div className={`bg-[#212121] p-1 rounded-full border border-white/20 h-full flex items-center ${widthClass}`}>
+                <button 
+                    onClick={() => setIsOpen(!isOpen)}
+                    className={`w-full h-full flex items-center justify-center gap-2 text-xs font-semibold rounded-full transition-all ${isOpen ? 'bg-[#2f2f2f] text-white' : 'text-gray-300 hover:text-white'}`}
+                >
+                    <span>{current}</span>
+                    <svg 
+                        className={`w-3 h-3 transition-transform duration-200 ${isOpen ? 'rotate-180 text-white' : 'text-gray-400'}`} 
+                        fill="none" 
+                        viewBox="0 0 24 24" 
+                        stroke="currentColor"
+                    >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                </button>
+            </div>
+
+            {/* Dropdown List - Increased border opacity to 20% */}
+            {isOpen && (
+                <div className={`absolute top-full right-0 mt-2 ${widthClass} bg-[#212121] border border-white/20 rounded-[24px] shadow-xl overflow-hidden z-50 flex flex-col p-1 animate-fade-in origin-top-right`}>
+                    {languages.map((lang) => (
+                        <button
+                            key={lang}
+                            onClick={() => {
+                                onChange(lang);
+                                setIsOpen(false);
+                            }}
+                            className={`text-center py-2.5 text-xs rounded-2xl transition-colors font-medium ${current === lang ? 'bg-[#2f2f2f] text-white' : 'text-gray-400 hover:bg-white/5 hover:text-gray-200'}`}
+                        >
+                            {lang}
+                        </button>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+};
 
 const App = () => {
   // Config State
-  const [language, setLanguage] = useState<Language>('EN');
-  // Use Ref to track language for async operations so we always use the latest selected language for generation
-  const languageRef = useRef<Language>('EN');
+  const [language, setLanguage] = useState<Language>('RU');
+  const languageRef = useRef<Language>('RU');
   
   // App State
   const [activeTab, setActiveTab] = useState<'analyze' | 'history'>('analyze');
@@ -28,31 +141,33 @@ const App = () => {
   const [progress, setProgress] = useState(0);
   const [currentStatusMsg, setCurrentStatusMsg] = useState<string>("");
 
-  // History State
+  const currentDraftRef = useRef<string>("");
   const [history, setHistory] = useState<HistoryItem[]>([]);
   
-  // Stats
+  // --- Timer Stats ---
   const [startTime, setStartTime] = useState<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [estimatedTotalSeconds, setEstimatedTotalSeconds] = useState<number | null>(null);
+  // estimatedTotalDuration represents the predicted Total time from start to finish
+  const [estimatedTotalDuration, setEstimatedTotalDuration] = useState<number | null>(null);
   const [sessionTokens, setSessionTokens] = useState<number>(0);
-
+  
   const logEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const T = UI_TEXT[language];
 
+  const isInteractionEnabled = processingState === ProcessingState.IDLE || 
+                               processingState === ProcessingState.COMPLETED || 
+                               processingState === ProcessingState.ERROR;
+
   // --- Initialization ---
 
   useEffect(() => {
-    // Recover Language
     const storedLang = localStorage.getItem("app_language");
     if (storedLang && ['EN','RU','ES','DE','FR'].includes(storedLang)) {
       setLanguage(storedLang as Language);
       languageRef.current = storedLang as Language;
     }
-
-    // Recover History
     try {
       const storedHistory = localStorage.getItem("summary_history");
       if (storedHistory) {
@@ -68,31 +183,28 @@ const App = () => {
   }, [history]);
 
   useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    logEndRef.current?.scrollIntoView({ behavior: "auto" });
   }, [logs]);
 
-  // Sync ref with state
   useEffect(() => {
     languageRef.current = language;
   }, [language]);
 
-  // Timer
+  // --- Timer Tick ---
   useEffect(() => {
     let interval: any;
-    if (processingState !== ProcessingState.IDLE && processingState !== ProcessingState.COMPLETED && processingState !== ProcessingState.ERROR && startTime) {
+    const isActive = processingState !== ProcessingState.IDLE && 
+                     processingState !== ProcessingState.COMPLETED && 
+                     processingState !== ProcessingState.ERROR;
+
+    if (isActive && startTime) {
       interval = setInterval(() => {
         const now = Date.now();
-        const elapsed = Math.floor((now - startTime) / 1000);
-        setElapsedSeconds(elapsed);
-
-        if (progress > 5) { 
-           const total = Math.floor(elapsed * 100 / progress);
-           setEstimatedTotalSeconds(total);
-        }
+        setElapsedSeconds(Math.floor((now - startTime) / 1000));
       }, 1000);
     }
     return () => clearInterval(interval);
-  }, [processingState, startTime, progress]);
+  }, [processingState, startTime]);
 
   // --- Handlers ---
 
@@ -110,6 +222,13 @@ const App = () => {
     }]);
   };
 
+  const formatTime = (seconds: number) => {
+    if (seconds < 0) seconds = 0;
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
   // --- Core Processing Logic ---
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -121,8 +240,9 @@ const App = () => {
       setProgress(0);
       setStartTime(null);
       setElapsedSeconds(0);
-      setEstimatedTotalSeconds(null);
+      setEstimatedTotalDuration(null);
       setCurrentStatusMsg("");
+      currentDraftRef.current = ""; 
     }
   };
 
@@ -130,12 +250,16 @@ const App = () => {
     if (!file) return;
 
     try {
-      setStartTime(Date.now());
+      const startT = Date.now();
+      setStartTime(startT);
       setProcessingState(ProcessingState.PARSING);
       setCurrentStatusMsg(T.statusReading);
-      addLog(`System: ${T.fileParsed} ${file.name}...`);
       
-      // 1. Parsing
+      if (processingState === ProcessingState.ERROR) setLogs([]);
+      
+      addLog(`System: ${T.fileParsed} ${file.name}...`);
+      currentDraftRef.current = "";
+      
       const parseStart = Date.now();
       const text = await parseFile(file);
       const parseDuration = ((Date.now() - parseStart) / 1000).toFixed(2);
@@ -143,28 +267,29 @@ const App = () => {
 
       if (text.length < 100) throw new Error("Text too short.");
 
-      // 2. Chunking (Smaller chunks for higher fidelity)
+      // --- 1. Initial Calculation ---
+      // Logic: 500k chars ~ 240 seconds (4 mins).
+      // Rate: 240 / 500000 = 0.00048 sec/char.
+      const initialEstimate = Math.ceil(text.length * 0.00048);
+      // Ensure at least 30s for small files to avoid instant "00:00"
+      setEstimatedTotalDuration(Math.max(30, initialEstimate));
+
       setProcessingState(ProcessingState.CHUNKING);
       setCurrentStatusMsg(T.chunking);
-      const chunks: string[] = [];
-      for (let i = 0; i < text.length; i += CHUNK_SIZE) {
-        chunks.push(text.slice(i, i + CHUNK_SIZE));
-      }
       
-      addLog(`${T.chunking}: ${chunks.length} parts (~${(CHUNK_SIZE / 1000).toFixed(0)}k chars each). High detail mode.`);
+      const chunks = smartSplitText(text, CHUNK_SIZE);
+      const totalChunks = chunks.length;
+      
+      addLog(`${T.chunking}: ${chunks.length} parts (Smart boundary detection enabled).`);
 
-      // Initialize AI with Env Key
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       
-      // 3. Extraction (Stage 1)
       setProcessingState(ProcessingState.SUMMARIZING);
       setCurrentStatusMsg(T.statusThinking);
       const extractedSummaries: string[] = new Array(chunks.length).fill("");
       
       for (let i = 0; i < chunks.length; i += MAX_CONCURRENT_REQUESTS) {
         const batch = chunks.slice(i, i + MAX_CONCURRENT_REQUESTS);
-        
-        // Fetch latest prompts for this specific batch execution
         const batchPrompts = getPrompts(languageRef.current);
 
         const batchPromises = batch.map(async (chunk, batchIdx) => {
@@ -193,27 +318,42 @@ const App = () => {
           }
         });
 
-        const results = await Promise.all(batchPromises);
-        results.forEach(res => {
-          if (res.text) extractedSummaries[res.idx] = res.text;
+        await Promise.all(batchPromises).then(results => {
+           results.forEach(res => {
+             if (res.text) extractedSummaries[res.idx] = res.text;
+           });
         });
         
+        // --- 2. Dynamic Update of Total Duration ---
+        // Calculate average time per chunk so far (including parse time as overhead)
+        const now = Date.now();
+        const timeElapsedSoFar = (now - startT) / 1000;
+        const chunksCompleted = i + batch.length;
+        
+        const avgTimePerChunk = timeElapsedSoFar / chunksCompleted;
+        
+        // Prediction: Elapsed + (Avg * RemainingChunks) + Fixed Overhead for Consolidation
+        const chunksRemaining = totalChunks - chunksCompleted;
+        const overheadForConsolidation = avgTimePerChunk * 1.5; // Roughly 1.5x chunk time for final polish
+        
+        const newTotalEstimate = Math.ceil(timeElapsedSoFar + (avgTimePerChunk * chunksRemaining) + overheadForConsolidation);
+        
+        setEstimatedTotalDuration(newTotalEstimate);
+        
+        currentDraftRef.current = extractedSummaries.filter(s => s.trim().length > 0).join("\n\n");
         const extractedPercent = Math.round(((i + batch.length) / chunks.length) * 60);
         setProgress(extractedPercent);
       }
 
-      const combinedDraft = extractedSummaries.filter(s => s.trim().length > 0).join("\n\n");
+      const combinedDraft = currentDraftRef.current;
       
       if (combinedDraft.length === 0) throw new Error("Failed to extract any text.");
 
-      // 4. Consolidation (Stage 2)
       setProcessingState(ProcessingState.POLISHING);
       setCurrentStatusMsg(T.statusThinking);
       
       addLog(`[${T.step2}] Consolidating ${chunks.length} parts...`);
       const consolidateStart = Date.now();
-      
-      // Fetch latest prompts for consolidation
       const consolidatePrompts = getPrompts(languageRef.current);
 
       const consolidatedResponse = await ai.models.generateContent({
@@ -230,13 +370,10 @@ const App = () => {
       addLog(`[${T.step2}] Consolidation done (${consolidateDuration}s). Size: ${consolidatedText.length}.`, 'success');
       setProgress(80);
 
-      // 5. Polishing (Stage 3)
-      addLog(`[${T.step3}] Final formatting (Obsidian style)...`);
+      addLog(`[${T.step3}] Final formatting...`);
       setCurrentStatusMsg(T.statusWriting);
       
       const polishStart = Date.now();
-      
-      // Fetch latest prompts for final polish - this guarantees output is in currently selected language
       const polishPrompts = getPrompts(languageRef.current);
 
       const finalResponse = await ai.models.generateContent({
@@ -253,16 +390,14 @@ const App = () => {
       setFinalSummary(finalText);
       addLog(`[${T.step3}] Finished (${polishDuration}s).`, 'success');
       
-      // Save
       const newHistoryItem: HistoryItem = {
         id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
         timestamp: Date.now(),
         fileName: file.name,
-        // Save the language that was used for the FINAL output
         language: languageRef.current,
         summary: finalText,
         model: GEMINI_MODEL,
-        tokenUsage: usagePolish // Approximation
+        tokenUsage: usagePolish
       };
       
       setHistory(prev => [newHistoryItem, ...prev]);
@@ -272,9 +407,31 @@ const App = () => {
 
     } catch (error: any) {
       console.error(error);
-      addLog(`[${T.criticalError}] ${error.message}`, 'error');
-      setProcessingState(ProcessingState.ERROR);
-      setCurrentStatusMsg(T.error);
+      
+      if (currentDraftRef.current && currentDraftRef.current.length > 500) {
+          addLog(`[${T.criticalError}] Pipeline failed, but partial data was recovered.`, 'warning');
+          addLog("Displaying raw consolidated draft.", 'info');
+          
+          setFinalSummary(currentDraftRef.current);
+          setProcessingState(ProcessingState.COMPLETED);
+          setCurrentStatusMsg("Completed with Errors");
+          
+           const newHistoryItem: HistoryItem = {
+            id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+            timestamp: Date.now(),
+            fileName: file.name + " (PARTIAL)",
+            language: languageRef.current,
+            summary: currentDraftRef.current,
+            model: GEMINI_MODEL,
+            tokenUsage: sessionTokens
+          };
+          setHistory(prev => [newHistoryItem, ...prev]);
+          
+      } else {
+          addLog(`[${T.criticalError}] ${error.message}`, 'error');
+          setProcessingState(ProcessingState.ERROR);
+          setCurrentStatusMsg(T.error);
+      }
     }
   };
 
@@ -346,150 +503,202 @@ const App = () => {
     URL.revokeObjectURL(url);
   };
 
-  const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  };
-
   // --- Render ---
 
+  // Calculated Remaining for Display
+  const remainingDisplay = estimatedTotalDuration !== null 
+    ? Math.max(0, estimatedTotalDuration - elapsedSeconds) 
+    : null;
+
   return (
-    <div className="min-h-screen p-4 md:p-8 max-w-4xl mx-auto font-sans pb-20">
+    <div className="min-h-screen p-4 md:p-6 max-w-4xl mx-auto font-sans pb-20">
       
       {/* Header */}
-      <header className="mb-8 flex flex-col md:flex-row justify-between items-center md:items-start gap-4 md:gap-8">
+      <header className="mb-8 flex flex-col md:flex-row justify-between items-center md:items-start gap-6">
         <div className="text-center md:text-left order-2 md:order-1">
            <h1 className="text-3xl font-serif font-bold text-white mb-2 tracking-tight">{T.title}</h1>
-           <p className="text-gray-400 text-sm">{T.subtitle}</p>
-           {sessionTokens > 0 && (
-            <div className="mt-2 inline-flex items-center gap-2">
-                <span className="text-[10px] uppercase tracking-wide text-indigo-400 bg-indigo-900/20 px-2 py-0.5 rounded border border-indigo-900/50">
-                    {T.tokenUsage}: {sessionTokens.toLocaleString()}
-                </span>
-                <a href="https://console.cloud.google.com/apis/dashboard" target="_blank" rel="noreferrer" className="text-[10px] text-gray-600 hover:text-gray-400 underline">
-                 {T.checkQuota}
-                </a>
-            </div>
-           )}
+           <p className="text-[#9b9b9b] text-sm">{T.subtitle}</p>
         </div>
 
-        <div className="flex flex-col items-end gap-2 order-1 md:order-2 w-full md:w-auto">
-          <div className="flex gap-2 w-full justify-end">
-            <select 
-                value={language} 
-                onChange={(e) => handleLanguageChange(e.target.value as Language)}
-                className="bg-neutral-900 text-gray-400 text-xs px-2 py-1.5 rounded border border-neutral-800 outline-none hover:border-neutral-600 transition-colors"
-            >
-                <option value="EN">EN</option>
-                <option value="RU">RU</option>
-                <option value="ES">ES</option>
-                <option value="DE">DE</option>
-                <option value="FR">FR</option>
-            </select>
-          </div>
+        <div className="flex items-center gap-3 order-1 md:order-2 h-10">
+           {/* Tab Segmented Control */}
+           <div className="bg-[#212121] p-1 rounded-full flex gap-1 items-center border border-white/20 h-full">
+              <button 
+                onClick={() => setActiveTab('analyze')}
+                className={`px-4 py-1.5 text-xs font-semibold rounded-full transition-all h-full flex items-center ${activeTab === 'analyze' ? 'bg-[#2f2f2f] text-white border border-white/10' : 'text-gray-400 hover:text-gray-200 border border-transparent'}`}
+              >
+                {T.tabAnalyze}
+              </button>
+              <button 
+                onClick={() => setActiveTab('history')}
+                className={`px-4 py-1.5 text-xs font-semibold rounded-full transition-all h-full flex items-center ${activeTab === 'history' ? 'bg-[#2f2f2f] text-white border border-white/10' : 'text-gray-400 hover:text-gray-200 border border-transparent'}`}
+              >
+                {T.tabHistory} 
+                {history.length > 0 && <span className="ml-1 opacity-70">({history.length})</span>}
+              </button>
+           </div>
+
+           {/* Custom Language Dropdown */}
+           <LanguageDropdown current={language} onChange={handleLanguageChange} />
         </div>
       </header>
 
-      {/* Tabs */}
-      <div className="flex border-b border-neutral-800 mb-6">
-        <button 
-          onClick={() => setActiveTab('analyze')}
-          className={`px-6 py-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'analyze' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-500 hover:text-gray-300'}`}
-        >
-          {T.tabAnalyze}
-        </button>
-        <button 
-           onClick={() => setActiveTab('history')}
-           className={`px-6 py-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'history' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-500 hover:text-gray-300'}`}
-        >
-          {T.tabHistory} <span className="ml-1 text-xs opacity-50 bg-neutral-800 px-1.5 py-0.5 rounded-full">{history.length}</span>
-        </button>
-      </div>
-
-      {/* TAB: ANALYZE */}
+      {/* Content Area */}
       {activeTab === 'analyze' && (
-        <div className="animate-fade-in">
-          {/* File Upload */}
-          <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-8 mb-6 text-center transition-all hover:border-neutral-700 relative overflow-hidden group">
-            <input
-              type="file"
-              id="fileInput"
-              accept=".pdf,.epub,.fb2,.xml,.txt"
-              onChange={handleFileChange}
-              className="hidden"
-              disabled={processingState !== ProcessingState.IDLE && processingState !== ProcessingState.COMPLETED && processingState !== ProcessingState.ERROR}
-            />
-            
-            <label
-              htmlFor="fileInput"
-              className={`inline-flex items-center justify-center px-8 py-3 border border-transparent text-sm font-bold uppercase tracking-wider rounded-lg text-black bg-white transition-all 
-                ${(processingState !== ProcessingState.IDLE && processingState !== ProcessingState.COMPLETED && processingState !== ProcessingState.ERROR) 
-                  ? 'opacity-50 cursor-not-allowed' 
-                  : 'hover:bg-gray-200 cursor-pointer shadow-lg hover:shadow-xl hover:-translate-y-0.5'}`}
-            >
-              {file ? T.changeFile : T.selectFile}
-            </label>
-            
-            {file && (
-              <div className="mt-6 text-gray-300 z-10 relative">
-                <div className="inline-block p-4 bg-black/30 rounded-lg border border-neutral-800">
-                    <p className="font-serif text-lg text-white">{file.name}</p>
-                    <p className="text-xs text-gray-500 uppercase mt-1">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
-                </div>
+        <div className="animate-fade-in flex flex-col gap-6">
+          
+          {/* File Upload Area */}
+          <div className="relative group">
+             {/* Hidden File Input */}
+             <input
+                type="file"
+                id="fileInput"
+                accept=".zip,.pdf,.fb2,.xml,.txt,.md"
+                onChange={handleFileChange}
+                className="hidden"
+                disabled={!isInteractionEnabled}
+             />
+             
+             {/* Main Card UI */}
+             <div className="bg-[#212121] rounded-[2rem] p-6 border border-white/20 transition-colors">
                 
-                {processingState === ProcessingState.IDLE && (
-                  <div className="mt-6">
-                    <button
-                        onClick={processBook}
-                        className="px-8 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-lg font-bold transition-all shadow-lg hover:shadow-indigo-500/25 active:scale-95"
+                {/* 1. STATE: NO FILE SELECTED (Big Clickable Area) */}
+                {!file && (
+                    <label 
+                        htmlFor="fileInput" 
+                        className="flex flex-col items-center justify-center gap-4 py-10 cursor-pointer hover:bg-[#262626] rounded-xl transition-colors w-full h-full"
                     >
-                        {T.startAnalysis}
-                    </button>
-                  </div>
+                        <div className="bg-[#2f2f2f] rounded-full p-5 border border-white/10">
+                            <svg className="w-8 h-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
+                            </svg>
+                        </div>
+                        <div className="text-center">
+                            <span className="text-gray-200 font-semibold text-lg">{T.selectFile}</span>
+                            <p className="text-gray-500 text-xs mt-1">ZIP, PDF, FB2, TXT, MD</p>
+                        </div>
+                    </label>
                 )}
-              </div>
-            )}
+
+                {/* 2. STATE: FILE SELECTED (File Info + Actions) */}
+                {file && (
+                    <div className="flex flex-col items-center gap-6 py-4 w-full">
+                        {/* File Info */}
+                        <div className="flex flex-col items-center">
+                            <div className="w-12 h-12 bg-[#2f2f2f] rounded-full flex items-center justify-center border border-white/10 mb-3">
+                                <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                            </div>
+                            <p className="font-serif text-xl text-white text-center px-4 break-words max-w-full">{file.name}</p>
+                            <p className="text-xs text-[#10a37f] font-mono mt-1 uppercase tracking-wider">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                        </div>
+
+                        {/* Action Buttons: GRID for equal sizing */}
+                        <div className="w-full max-w-md grid grid-cols-2 gap-3">
+                            {/* Change File (Outline Style) */}
+                            {isInteractionEnabled && (
+                                <label 
+                                    htmlFor="fileInput"
+                                    className="flex items-center justify-center px-4 py-3 bg-transparent hover:bg-white/5 text-white rounded-full text-xs font-bold uppercase tracking-wider cursor-pointer border border-white/20 transition-all text-center leading-tight min-h-[56px] select-none"
+                                >
+                                    {T.changeFile}
+                                </label>
+                            )}
+
+                            {/* Start Analysis (Primary Green) */}
+                            {isInteractionEnabled && (
+                                <button
+                                    onClick={processBook}
+                                    className="flex items-center justify-center px-4 py-3 bg-[#10a37f] hover:bg-[#0e906f] text-white rounded-full font-bold uppercase tracking-wider transition-all border border-transparent text-center leading-tight min-h-[56px] select-none shadow-md"
+                                >
+                                    <div className="flex items-center gap-2">
+                                        <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                        </svg>
+                                        <span>{processingState === ProcessingState.ERROR ? "RETRY" : T.startAnalysis}</span>
+                                    </div>
+                                </button>
+                            )}
+
+                             {/* Processing State */}
+                             {(!isInteractionEnabled) && (
+                                <div className="col-span-2 flex items-center justify-center px-8 py-3 bg-[#2f2f2f] text-gray-200 rounded-full font-medium border border-white/10 gap-3 min-h-[56px]">
+                                    <div className="w-4 h-4 border-2 border-gray-500 border-t-white rounded-full animate-spin"></div>
+                                    <span className="text-xs uppercase tracking-wider">{currentStatusMsg || T.statusThinking}</span>
+                                </div>
+                             )}
+                        </div>
+                    </div>
+                )}
+             </div>
           </div>
 
-          {/* Progress & Logs */}
+          {/* Progress & Logs - Dark container */}
           {(processingState !== ProcessingState.IDLE || logs.length > 0) && (
-            <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6 mb-6 shadow-lg">
-              <div className="flex justify-between items-center mb-4 border-b border-neutral-800 pb-2">
-                <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
-                    <h2 className="text-xs font-bold text-gray-400 uppercase tracking-widest">{T.logs}</h2>
-                    {currentStatusMsg && (
-                         <div className="flex items-center gap-2 bg-indigo-500/10 px-2 py-1 rounded text-indigo-400 text-xs font-medium border border-indigo-500/20">
-                            <span className="relative flex h-2 w-2">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
-                              <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
-                            </span>
-                            {currentStatusMsg}
-                         </div>
+            <div className="bg-[#212121] border border-white/20 rounded-[2rem] p-6 shadow-sm">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 border-b border-white/5 pb-2 gap-2">
+                
+                {/* Left Side: Title + Timers Group */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full sm:w-auto">
+                    <h2 className="text-xs font-bold text-gray-500 uppercase tracking-widest">{T.logs}</h2>
+                    
+                    {/* Unified Timers Group - Side by Side */}
+                    {(processingState !== ProcessingState.IDLE) && (
+                       <div className="flex items-center gap-3">
+                          {/* Elapsed */}
+                          <div className="text-[10px] font-mono text-gray-300 bg-[#2f2f2f] px-3 py-1.5 rounded-lg border border-white/10 flex items-center gap-2">
+                             <div className={`w-1.5 h-1.5 rounded-full ${processingState === ProcessingState.COMPLETED ? 'bg-green-500' : 'bg-green-500 animate-pulse'}`}></div>
+                             <span>{T.timeElapsed}: {formatTime(elapsedSeconds)}</span>
+                          </div>
+                          
+                          {/* Remaining - Derived from TotalEstimate - Elapsed */}
+                          {processingState !== ProcessingState.COMPLETED && (
+                             <div className="text-[10px] font-mono text-gray-400 bg-[#2f2f2f] px-3 py-1.5 rounded-lg border border-white/10">
+                                <span>{T.timeRem}: {remainingDisplay !== null ? formatTime(remainingDisplay) : "--:--"}</span>
+                             </div>
+                          )}
+                       </div>
                     )}
                 </div>
-                <span className="text-xs text-indigo-400 font-mono font-bold whitespace-nowrap">{progress}%</span>
+                
+                {/* Right Side: Status + Progress */}
+                <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end mt-2 sm:mt-0">
+                    <div className="flex items-center gap-3">
+                        {currentStatusMsg && (
+                            <div className={`hidden sm:flex items-center gap-2 bg-black/30 px-3 py-1 rounded-full text-xs font-medium border ${processingState === ProcessingState.ERROR ? 'text-red-400 border-red-500/20' : 'text-green-400 border-green-500/20'}`}>
+                                {processingState !== ProcessingState.ERROR && (
+                                    <span className="relative flex h-2 w-2">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                                    </span>
+                                )}
+                                <span className="truncate max-w-[150px]">{currentStatusMsg}</span>
+                            </div>
+                        )}
+                        <span className="text-xs text-gray-400 font-mono font-bold whitespace-nowrap min-w-[35px] text-right">{progress}%</span>
+                    </div>
+                </div>
               </div>
               
-              {processingState !== ProcessingState.IDLE && processingState !== ProcessingState.COMPLETED && processingState !== ProcessingState.ERROR && (
-                <div className="mb-3 text-xs font-mono text-gray-500 bg-black/20 px-3 py-2 rounded flex justify-between">
-                    <span>{T.timeElapsed}: <span className="text-white">{formatTime(elapsedSeconds)}</span></span>
-                    {estimatedTotalSeconds !== null && (
-                        <span>
-                            {T.timeRem}: <span className="text-white">{formatTime(Math.max(0, estimatedTotalSeconds - elapsedSeconds))}</span>
-                        </span>
-                    )}
+              {/* Token Usage Stats */}
+              {sessionTokens > 0 && (
+                <div className="mb-4 flex items-center justify-between text-[10px] text-gray-600 px-1">
+                   <span>TOKENS: {sessionTokens.toLocaleString()}</span>
+                   {/* Mobile only status message */}
+                   <span className="sm:hidden text-gray-500 truncate max-w-[200px]">{currentStatusMsg}</span>
                 </div>
               )}
 
-              <div className="h-56 overflow-y-auto font-mono text-xs space-y-2 pr-2 custom-scrollbar bg-black/40 p-4 rounded-lg border border-neutral-800/50">
+              <div className="h-48 overflow-y-auto font-mono text-xs space-y-2 pr-2 custom-scrollbar p-2">
                 {logs.map((log) => (
                   <div key={log.id} className={`flex gap-3 leading-relaxed ${
-                    log.type === 'error' ? 'text-red-400 bg-red-900/10 p-1 rounded' : 
-                    log.type === 'success' ? 'text-green-400' : 
+                    log.type === 'error' ? 'text-red-400' : 
+                    log.type === 'success' ? 'text-[#10a37f]' : 
                     log.type === 'warning' ? 'text-amber-400' : 'text-gray-500'
                   }`}>
-                    <span className="opacity-40 shrink-0 select-none">[{log.timestamp.toLocaleTimeString()}]</span>
+                    <span className="opacity-30 shrink-0 select-none">[{log.timestamp.toLocaleTimeString().split(' ')[0]}]</span>
                     <span>{log.message}</span>
                   </div>
                 ))}
@@ -500,23 +709,22 @@ const App = () => {
 
           {/* Final Result */}
           {finalSummary && (
-            <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-8 shadow-2xl relative">
-                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 to-teal-500"></div>
-              <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 border-b border-neutral-800 pb-6 gap-4">
+            <div className="bg-[#212121] border border-white/20 rounded-[2rem] p-8 relative">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 border-b border-white/5 pb-6 gap-4">
                 <div>
-                  <h2 className="text-3xl font-serif text-white">{T.summaryTitle}</h2>
-                  <p className="text-sm text-gray-500 mt-2">{T.generatedBy}</p>
+                  <h2 className="text-2xl font-serif text-white">{T.summaryTitle}</h2>
+                  <p className="text-xs text-gray-600 mt-2 tracking-wide uppercase">{T.generatedBy}</p>
                 </div>
-                <div className="flex gap-3">
+                <div className="flex gap-2">
                      <button
                       onClick={() => downloadMarkdown(finalSummary, file?.name || 'book')}
-                      className="px-5 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-gray-200 text-sm font-medium rounded-lg transition-colors border border-neutral-700 flex items-center gap-2"
+                      className="px-4 py-2 bg-[#2f2f2f] hover:bg-[#3f3f3f] text-gray-200 text-xs font-bold uppercase rounded-full border border-white/20 transition-colors flex items-center gap-2"
                     >
-                      {T.download}
+                      MD
                     </button>
                     <button
                       onClick={() => copyToClipboard(finalSummary)}
-                      className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors shadow-lg hover:shadow-indigo-500/20 flex items-center gap-2"
+                      className="px-4 py-2 bg-[#2f2f2f] hover:bg-[#3f3f3f] text-gray-200 text-xs font-bold uppercase rounded-full border border-white/20 transition-colors flex items-center gap-2"
                     >
                       {T.copy}
                     </button>
@@ -524,7 +732,7 @@ const App = () => {
               </div>
               <div 
                 className="markdown-content text-gray-300 leading-7 text-sm md:text-base font-light"
-                dangerouslySetInnerHTML={{ __html: marked.parse(finalSummary) }}
+                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(finalSummary)) }}
               />
             </div>
           )}
@@ -533,8 +741,8 @@ const App = () => {
 
       {/* TAB: HISTORY */}
       {activeTab === 'history' && (
-        <div className="animate-fade-in space-y-6">
-            <div className="flex justify-end gap-3 mb-4">
+        <div className="animate-fade-in space-y-4">
+            <div className="flex justify-end gap-2 mb-4">
                 <input 
                     type="file" 
                     ref={fileInputRef}
@@ -544,33 +752,33 @@ const App = () => {
                 />
                 <button 
                     onClick={() => fileInputRef.current?.click()}
-                    className="text-xs text-gray-400 hover:text-white border border-neutral-800 hover:bg-neutral-800 px-3 py-2 rounded transition-colors"
+                    className="text-xs text-gray-400 hover:text-white bg-[#212121] hover:bg-[#2f2f2f] px-4 py-2 rounded-full border border-white/20 transition-colors"
                 >
                     {T.import}
                 </button>
                 <button 
                     onClick={handleExportBackup}
                     disabled={history.length === 0}
-                    className="text-xs text-indigo-400 hover:text-indigo-300 border border-indigo-900/50 hover:bg-indigo-900/20 px-3 py-2 rounded transition-colors disabled:opacity-50"
+                    className="text-xs text-gray-400 hover:text-white bg-[#212121] hover:bg-[#2f2f2f] px-4 py-2 rounded-full border border-white/20 transition-colors disabled:opacity-30"
                 >
                     {T.export}
                 </button>
             </div>
 
             {history.length === 0 ? (
-                <div className="text-center py-20 text-gray-600">
+                <div className="text-center py-20 text-gray-800">
                     <p>{T.historyEmpty}</p>
                 </div>
             ) : (
-                <div className="grid gap-4">
+                <div className="grid gap-3">
                     {history.map((item) => (
-                        <div key={item.id} className="bg-neutral-900 border border-neutral-800 rounded-lg p-5 hover:border-neutral-700 transition-colors">
+                        <div key={item.id} className="bg-[#212121] border border-white/20 rounded-3xl p-6 hover:bg-[#262626] transition-colors group">
                             <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
                                 <div>
-                                    <h3 className="font-serif text-lg text-white mb-1">{item.fileName}</h3>
-                                    <div className="flex gap-3 text-xs text-gray-500">
+                                    <h3 className="font-serif text-lg text-white mb-1 group-hover:text-green-400 transition-colors">{item.fileName}</h3>
+                                    <div className="flex gap-3 text-xs text-gray-600">
                                         <span>{new Date(item.timestamp).toLocaleString()}</span>
-                                        <span className="px-1.5 py-0.5 bg-neutral-800 rounded">{item.language}</span>
+                                        <span className="px-2 py-0.5 bg-[#2f2f2f] rounded-full text-gray-400">{item.language}</span>
                                     </div>
                                 </div>
                                 <div className="flex gap-2">
@@ -581,21 +789,17 @@ const App = () => {
                                             setActiveTab('analyze');
                                             setProcessingState(ProcessingState.COMPLETED);
                                         }}
-                                        className="px-3 py-1.5 bg-indigo-900/30 text-indigo-300 rounded hover:bg-indigo-900/50 text-xs font-medium border border-indigo-900/50"
+                                        className="px-4 py-2 bg-[#2f2f2f] hover:bg-[#10a37f] text-gray-300 hover:text-white rounded-full text-xs font-bold uppercase border border-white/20 transition-colors"
                                     >
                                         {T.view}
                                     </button>
                                     <button 
-                                        onClick={() => downloadMarkdown(item.summary, item.fileName)}
-                                        className="px-3 py-1.5 bg-neutral-800 text-gray-400 rounded hover:bg-neutral-700 text-xs border border-neutral-700"
-                                    >
-                                        MD
-                                    </button>
-                                    <button 
                                         onClick={() => handleDeleteHistory(item.id)}
-                                        className="px-3 py-1.5 text-red-400 hover:text-red-300 text-xs hover:bg-red-900/20 rounded"
+                                        className="px-3 py-2 text-gray-600 hover:text-red-400 text-xs rounded-full border border-white/10 transition-colors"
                                     >
-                                        {T.delete}
+                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                        </svg>
                                     </button>
                                 </div>
                             </div>

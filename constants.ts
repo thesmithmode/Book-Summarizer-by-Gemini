@@ -9,8 +9,8 @@ export const GEMINI_MODEL = 'gemini-3-pro-preview';
 export const UI_TEXT: Record<Language, any> = {
   EN: {
     title: "AI Book Summarizer",
-    subtitle: "Deep knowledge extraction (Obsidian Style)",
-    selectFile: "Select Book (PDF, EPUB, FB2)",
+    subtitle: "Deep knowledge extraction",
+    selectFile: "Select Book (ZIP, PDF, FB2, TXT, MD)",
     changeFile: "Select Different Book",
     startAnalysis: "Start Deep Analysis",
     logs: "Process Log",
@@ -39,18 +39,18 @@ export const UI_TEXT: Record<Language, any> = {
     delete: "Delete",
     view: "View",
     restoreMsg: "History imported successfully",
-    statusThinking: "AI is extracting insights...",
+    statusThinking: "Analyzing content...",
     statusReading: "Reading document...",
     statusWriting: "Structuring final notes..."
   },
   RU: {
     title: "AI Book Summarizer",
-    subtitle: "Глубокий анализ книг (стиль Obsidian)",
-    selectFile: "Выберите книгу (PDF, EPUB, FB2)",
+    subtitle: "Глубокий анализ книг",
+    selectFile: "Выберите книгу (ZIP, PDF, FB2, TXT, MD)",
     changeFile: "Выбрать другую книгу",
     startAnalysis: "Начать глубокий анализ",
     logs: "Лог процесса",
-    timeElapsed: "Прошло",
+    timeElapsed: "В работе",
     timeRem: "Осталось",
     summaryTitle: "Резюме",
     generatedBy: "Сгенерировано AI Book Summarizer",
@@ -75,14 +75,14 @@ export const UI_TEXT: Record<Language, any> = {
     delete: "Удалить",
     view: "Открыть",
     restoreMsg: "История успешно восстановлена",
-    statusThinking: "Нейросеть извлекает смыслы...",
-    statusReading: "Чтение документа...",
-    statusWriting: "Структурирование заметки..."
+    statusThinking: "Анализ содержимого...",
+    statusReading: "Чтение файла...",
+    statusWriting: "Формирование заметки..."
   },
   ES: {
     title: "Resumidor de Libros IA",
-    subtitle: "Extracción profunda (Estilo Obsidian)",
-    selectFile: "Seleccionar Libro (PDF, EPUB, FB2)",
+    subtitle: "Extracción profunda",
+    selectFile: "Seleccionar Libro (ZIP, PDF, FB2, TXT, MD)",
     changeFile: "Seleccionar otro libro",
     startAnalysis: "Iniciar Análisis Profundo",
     logs: "Registro del Proceso",
@@ -111,14 +111,14 @@ export const UI_TEXT: Record<Language, any> = {
     delete: "Borrar",
     view: "Ver",
     restoreMsg: "Historial restaurado",
-    statusThinking: "IA extrayendo...",
+    statusThinking: "Analizando contenido...",
     statusReading: "Leyendo...",
     statusWriting: "Estructurando..."
   },
   DE: {
     title: "AI Buch-Zusammenfasser",
-    subtitle: "Tiefe Extraktion (Obsidian-Stil)",
-    selectFile: "Buch auswählen",
+    subtitle: "Tiefe Extraktion",
+    selectFile: "Buch auswählen (ZIP, PDF, FB2, TXT, MD)",
     changeFile: "Anderes Buch wählen",
     startAnalysis: "Tiefenanalyse starten",
     logs: "Prozessprotokoll",
@@ -147,14 +147,14 @@ export const UI_TEXT: Record<Language, any> = {
     delete: "Löschen",
     view: "Ansehen",
     restoreMsg: "Verlauf wiederhergestellt",
-    statusThinking: "KI extrahiert...",
+    statusThinking: "Inhaltsanalyse...",
     statusReading: "Lese...",
     statusWriting: "Strukturierung..."
   },
   FR: {
     title: "Résumeur de Livres IA",
-    subtitle: "Extraction approfondie (Style Obsidian)",
-    selectFile: "Sélectionner un livre",
+    subtitle: "Extraction approfondie",
+    selectFile: "Sélectionner un livre (ZIP, PDF, FB2, TXT, MD)",
     changeFile: "Choisir un autre livre",
     startAnalysis: "Analyse approfondie",
     logs: "Journal",
@@ -171,7 +171,7 @@ export const UI_TEXT: Record<Language, any> = {
     step1: "Phase 1 : Extraction approfondie",
     step2: "Phase 2 : Consolidation",
     step3: "Phase 3 : Structure finale",
-    error: "Erreur",
+    error: "Error",
     criticalError: "Erreur Critique",
     tokenUsage: "Usage des jetons",
     checkQuota: "Vérifier quota",
@@ -183,7 +183,7 @@ export const UI_TEXT: Record<Language, any> = {
     delete: "Supprimer",
     view: "Voir",
     restoreMsg: "Historique restauré",
-    statusThinking: "IA extrait...",
+    statusThinking: "Analyse du contenu...",
     statusReading: "Lecture...",
     statusWriting: "Rédaction..."
   }
@@ -199,19 +199,15 @@ export const getPrompts = (lang: Language) => {
   };
 
   const targetLang = langNameMap[lang];
-
-  // User provided strict Russian prompts. I map them exactly for RU, and translate the concept for others.
   
   const extractPrompt = lang === 'RU' 
     ? `Извлеки и синтезируй самую ценную, важную и практически применимую информацию из всех предоставленных источников. Полностью исключи теоретическую "воду", исторические отступления, анекдоты и любые другие неessentialные детали. Сформируй структурированное резюме, которое позволит понять суть всех источников без необходимости читать их целиком.
-    
-    Если ты что-то упустил или тебе не хватило места, чтобы написать, можешь разбить ответ на несколько частей, главное укажи в начале часть. Например 2/5.
     
     Точно всё? Ты ничего не упустил? Перепроверь.
     Язык вывода: РУССКИЙ.`
     : `Extract and synthesize the most valuable, important, and practically applicable information from the provided text. Completely exclude theoretical "fluff", historical digressions, anecdotes, and any other non-essential details. Form a structured summary that allows understanding the essence of all sources without reading them entirely.
     
-    If you miss something or run out of space, verify and continue.
+    Make sure you haven't missed anything important. Double check.
     OUTPUT LANGUAGE: ${targetLang}.`;
 
   const consolidatePrompt = lang === 'RU'
@@ -225,13 +221,13 @@ export const getPrompts = (lang: Language) => {
   const polishPrompt = lang === 'RU'
     ? `Структурируй текст ниже. Используй, если необходимо, заголовки H4 - H6, вложенные списки, нумерованные списки и т.д. 
     
-    ТЕБЕ ЗАПРЕЩЕНО ИСПОЛЬЗОВАНИЕ *ЖИРНОГО* И **КУРСИВА**. ВЕСЬ ТЕКСТ ДОЛЖЕН БЫТЬ ОБЫЧНЫМ (Regular weight).
+    ТЕБЕ ЗАПРЕЩЕНО ИСПОЛЬЗОВАНИЕ **ЖИРНОГО** (bold) И *КУРСИВА* (italics). Не используй символы ** или * для выделения текста. ВЕСЬ ТЕКСТ ДОЛЖЕН БЫТЬ ОБЫЧНЫМ (Regular weight).
     
-    Важно не потерять информацию, а структурировать её для Obsidian.
+    Важно не потерять информацию, а структурировать её.
     Язык вывода: РУССКИЙ.`
     : `Structure the text below. Use headers H4 - H6, nested lists, numbered lists, etc.
     
-    YOU ARE PROHIBITED FROM USING *BOLD* OR **ITALICS**.
+    YOU ARE PROHIBITED FROM USING **BOLD** OR *ITALICS*. Do not use ** or * markers.
     
     It is important not to lose information.
     OUTPUT LANGUAGE: ${targetLang}.`;
