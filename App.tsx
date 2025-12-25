@@ -83,8 +83,8 @@ const LanguageDropdown = ({
 
     const languages: Language[] = ['RU', 'EN', 'ES', 'DE', 'FR'];
 
-    // Shared width class for perfect alignment
-    const widthClass = "w-[90px]"; 
+    // Shared width class for perfect alignment - increased for larger text
+    const widthClass = "w-[105px]"; 
 
     return (
         <div className="relative h-full" ref={dropdownRef}>
@@ -92,7 +92,7 @@ const LanguageDropdown = ({
             <div className={`bg-[#212121] p-1 rounded-full border border-white/20 h-full flex items-center ${widthClass}`}>
                 <button 
                     onClick={() => setIsOpen(!isOpen)}
-                    className={`w-full h-full flex items-center justify-center gap-2 text-xs font-semibold rounded-full transition-all ${isOpen ? 'bg-[#2f2f2f] text-white' : 'text-gray-300 hover:text-white'}`}
+                    className={`w-full h-full flex items-center justify-center gap-2 text-base md:text-sm font-semibold rounded-full transition-all ${isOpen ? 'bg-[#2f2f2f] text-white' : 'text-gray-300 hover:text-white'}`}
                 >
                     <span>{current}</span>
                     <svg 
@@ -116,7 +116,7 @@ const LanguageDropdown = ({
                                 onChange(lang);
                                 setIsOpen(false);
                             }}
-                            className={`text-center py-2.5 text-xs rounded-2xl transition-colors font-medium ${current === lang ? 'bg-[#2f2f2f] text-white' : 'text-gray-400 hover:bg-white/5 hover:text-gray-200'}`}
+                            className={`text-center py-3 text-base rounded-2xl transition-colors font-medium ${current === lang ? 'bg-[#2f2f2f] text-white' : 'text-gray-400 hover:bg-white/5 hover:text-gray-200'}`}
                         >
                             {lang}
                         </button>
@@ -513,25 +513,29 @@ const App = () => {
   return (
     <div className="min-h-screen p-4 md:p-6 max-w-4xl mx-auto font-sans pb-20">
       
-      {/* Header */}
-      <header className="mb-8 flex flex-col md:flex-row justify-between items-center md:items-start gap-6">
-        <div className="text-center md:text-left order-2 md:order-1">
-           <h1 className="text-3xl font-serif font-bold text-white mb-2 tracking-tight">{T.title}</h1>
-           <p className="text-[#9b9b9b] text-sm">{T.subtitle}</p>
+      {/* Header - Optimized for Mobile */}
+      {/* Logic: Title First on Mobile, Row on Desktop */}
+      <header className="mb-6 md:mb-10 flex flex-col md:flex-row justify-between items-center md:items-end gap-6">
+        
+        {/* Title Block */}
+        <div className="text-center md:text-left">
+           <h1 className="text-3xl md:text-4xl font-serif font-bold text-white mb-2 tracking-tight">{T.title}</h1>
+           <p className="text-[#9b9b9b] text-sm md:text-base">{T.subtitle}</p>
         </div>
 
-        <div className="flex items-center gap-3 order-1 md:order-2 h-10">
+        {/* Controls Block - h-14 for mobile (large touch targets) */}
+        <div className="flex items-center gap-3 h-14 md:h-12 w-full md:w-auto justify-center">
            {/* Tab Segmented Control */}
            <div className="bg-[#212121] p-1 rounded-full flex gap-1 items-center border border-white/20 h-full">
               <button 
                 onClick={() => setActiveTab('analyze')}
-                className={`px-4 py-1.5 text-xs font-semibold rounded-full transition-all h-full flex items-center ${activeTab === 'analyze' ? 'bg-[#2f2f2f] text-white border border-white/10' : 'text-gray-400 hover:text-gray-200 border border-transparent'}`}
+                className={`px-4 md:px-6 h-full text-base md:text-sm font-semibold rounded-full transition-all flex items-center ${activeTab === 'analyze' ? 'bg-[#2f2f2f] text-white border border-white/10' : 'text-gray-400 hover:text-gray-200 border border-transparent'}`}
               >
                 {T.tabAnalyze}
               </button>
               <button 
                 onClick={() => setActiveTab('history')}
-                className={`px-4 py-1.5 text-xs font-semibold rounded-full transition-all h-full flex items-center ${activeTab === 'history' ? 'bg-[#2f2f2f] text-white border border-white/10' : 'text-gray-400 hover:text-gray-200 border border-transparent'}`}
+                className={`px-4 md:px-6 h-full text-base md:text-sm font-semibold rounded-full transition-all flex items-center ${activeTab === 'history' ? 'bg-[#2f2f2f] text-white border border-white/10' : 'text-gray-400 hover:text-gray-200 border border-transparent'}`}
               >
                 {T.tabHistory} 
                 {history.length > 0 && <span className="ml-1 opacity-70">({history.length})</span>}
@@ -560,22 +564,22 @@ const App = () => {
              />
              
              {/* Main Card UI */}
-             <div className="bg-[#212121] rounded-[2rem] p-6 border border-white/20 transition-colors">
+             <div className="bg-[#212121] rounded-[2rem] p-4 md:p-6 border border-white/20 transition-colors">
                 
                 {/* 1. STATE: NO FILE SELECTED (Big Clickable Area) */}
                 {!file && (
                     <label 
                         htmlFor="fileInput" 
-                        className="flex flex-col items-center justify-center gap-4 py-10 cursor-pointer hover:bg-[#262626] rounded-xl transition-colors w-full h-full"
+                        className="flex flex-col items-center justify-center gap-4 py-10 md:py-12 cursor-pointer hover:bg-[#262626] rounded-xl transition-colors w-full h-full"
                     >
                         <div className="bg-[#2f2f2f] rounded-full p-5 border border-white/10">
-                            <svg className="w-8 h-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <svg className="w-8 h-8 md:w-10 md:h-10 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
                             </svg>
                         </div>
                         <div className="text-center">
-                            <span className="text-gray-200 font-semibold text-lg">{T.selectFile}</span>
-                            <p className="text-gray-500 text-xs mt-1">ZIP, PDF, FB2, TXT, MD</p>
+                            <span className="text-gray-200 font-semibold text-xl md:text-lg">{T.selectFile}</span>
+                            <p className="text-gray-500 text-sm md:text-xs mt-1">ZIP, PDF, FB2, TXT, MD</p>
                         </div>
                     </label>
                 )}
@@ -594,26 +598,26 @@ const App = () => {
                             <p className="text-xs text-[#10a37f] font-mono mt-1 uppercase tracking-wider">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
                         </div>
 
-                        {/* Action Buttons: GRID for equal sizing */}
-                        <div className="w-full max-w-md grid grid-cols-2 gap-3">
-                            {/* Change File (Outline Style) */}
+                        {/* Action Buttons */}
+                        <div className="w-full max-w-md grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                            {/* Change File (Outline Style) - text-base for better readability */}
                             {isInteractionEnabled && (
                                 <label 
                                     htmlFor="fileInput"
-                                    className="flex items-center justify-center px-4 py-3 bg-transparent hover:bg-white/5 text-white rounded-full text-xs font-bold uppercase tracking-wider cursor-pointer border border-white/20 transition-all text-center leading-tight min-h-[56px] select-none"
+                                    className="flex items-center justify-center px-6 py-3 bg-transparent hover:bg-white/5 text-white rounded-full text-base md:text-sm font-bold uppercase tracking-wider cursor-pointer border border-white/20 transition-all text-center leading-tight min-h-[64px] md:min-h-[56px] select-none"
                                 >
                                     {T.changeFile}
                                 </label>
                             )}
 
-                            {/* Start Analysis (Primary Green) */}
+                            {/* Start Analysis (Primary Green) - text-base for better readability */}
                             {isInteractionEnabled && (
                                 <button
                                     onClick={processBook}
-                                    className="flex items-center justify-center px-4 py-3 bg-[#10a37f] hover:bg-[#0e906f] text-white rounded-full font-bold uppercase tracking-wider transition-all border border-transparent text-center leading-tight min-h-[56px] select-none shadow-md"
+                                    className="flex items-center justify-center px-6 py-3 bg-[#10a37f] hover:bg-[#0e906f] text-white rounded-full text-base md:text-sm font-bold uppercase tracking-wider transition-all border border-transparent text-center leading-tight min-h-[64px] md:min-h-[56px] select-none shadow-md"
                                 >
                                     <div className="flex items-center gap-2">
-                                        <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                         </svg>
@@ -622,11 +626,11 @@ const App = () => {
                                 </button>
                             )}
 
-                             {/* Processing State */}
+                             {/* Processing State - spans full width in both layouts */}
                              {(!isInteractionEnabled) && (
-                                <div className="col-span-2 flex items-center justify-center px-8 py-3 bg-[#2f2f2f] text-gray-200 rounded-full font-medium border border-white/10 gap-3 min-h-[56px]">
-                                    <div className="w-4 h-4 border-2 border-gray-500 border-t-white rounded-full animate-spin"></div>
-                                    <span className="text-xs uppercase tracking-wider">{currentStatusMsg || T.statusThinking}</span>
+                                <div className="col-span-1 sm:col-span-2 flex items-center justify-center px-8 py-3 bg-[#2f2f2f] text-gray-200 rounded-full font-medium border border-white/10 gap-3 min-h-[64px] md:min-h-[56px]">
+                                    <div className="w-5 h-5 border-2 border-gray-500 border-t-white rounded-full animate-spin"></div>
+                                    <span className="text-base md:text-sm uppercase tracking-wider">{currentStatusMsg || T.statusThinking}</span>
                                 </div>
                              )}
                         </div>
@@ -635,63 +639,58 @@ const App = () => {
              </div>
           </div>
 
-          {/* Progress & Logs - Dark container */}
+          {/* Progress & Logs - Completely Redesigned for Mobile Dashboard feel */}
           {(processingState !== ProcessingState.IDLE || logs.length > 0) && (
-            <div className="bg-[#212121] border border-white/20 rounded-[2rem] p-6 shadow-sm">
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 border-b border-white/5 pb-2 gap-2">
-                
-                {/* Left Side: Title + Timers Group */}
-                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full sm:w-auto">
-                    <h2 className="text-xs font-bold text-gray-500 uppercase tracking-widest">{T.logs}</h2>
-                    
-                    {/* Unified Timers Group - Side by Side */}
-                    {(processingState !== ProcessingState.IDLE) && (
-                       <div className="flex items-center gap-3">
-                          {/* Elapsed */}
-                          <div className="text-[10px] font-mono text-gray-300 bg-[#2f2f2f] px-3 py-1.5 rounded-lg border border-white/10 flex items-center gap-2">
-                             <div className={`w-1.5 h-1.5 rounded-full ${processingState === ProcessingState.COMPLETED ? 'bg-green-500' : 'bg-green-500 animate-pulse'}`}></div>
-                             <span>{T.timeElapsed}: {formatTime(elapsedSeconds)}</span>
-                          </div>
-                          
-                          {/* Remaining - Derived from TotalEstimate - Elapsed */}
-                          {processingState !== ProcessingState.COMPLETED && (
-                             <div className="text-[10px] font-mono text-gray-400 bg-[#2f2f2f] px-3 py-1.5 rounded-lg border border-white/10">
-                                <span>{T.timeRem}: {remainingDisplay !== null ? formatTime(remainingDisplay) : "--:--"}</span>
-                             </div>
-                          )}
-                       </div>
-                    )}
-                </div>
-                
-                {/* Right Side: Status + Progress */}
-                <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end mt-2 sm:mt-0">
-                    <div className="flex items-center gap-3">
-                        {currentStatusMsg && (
-                            <div className={`hidden sm:flex items-center gap-2 bg-black/30 px-3 py-1 rounded-full text-xs font-medium border ${processingState === ProcessingState.ERROR ? 'text-red-400 border-red-500/20' : 'text-green-400 border-green-500/20'}`}>
-                                {processingState !== ProcessingState.ERROR && (
-                                    <span className="relative flex h-2 w-2">
-                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-                                    </span>
-                                )}
-                                <span className="truncate max-w-[150px]">{currentStatusMsg}</span>
-                            </div>
-                        )}
-                        <span className="text-xs text-gray-400 font-mono font-bold whitespace-nowrap min-w-[35px] text-right">{progress}%</span>
-                    </div>
-                </div>
+            <div className="bg-[#212121] border border-white/20 rounded-[2rem] p-5 md:p-6 shadow-sm">
+              
+              {/* Header: Title + Percentage (Fixed Top Right) */}
+              <div className="flex justify-between items-center mb-5">
+                <h2 className="text-sm font-bold text-gray-500 uppercase tracking-widest">{T.logs}</h2>
+                {processingState !== ProcessingState.IDLE && (
+                   <span className="text-xl font-mono font-bold text-white leading-none">{progress}%</span>
+                )}
               </div>
               
-              {/* Token Usage Stats */}
+              {/* Dashboard Grid: Timers & Status */}
+              {processingState !== ProcessingState.IDLE && (
+                 <div className="flex flex-col gap-3 mb-6">
+                    {/* Timers Row: 2 Big Cards */}
+                    <div className="grid grid-cols-2 gap-3">
+                       {/* Elapsed */}
+                       <div className="bg-[#1a1a1a] rounded-xl p-3 md:p-4 border border-white/5 flex flex-col items-center justify-center relative min-h-[80px]">
+                           <div className={`absolute top-2 right-2 w-2 h-2 rounded-full ${processingState === ProcessingState.COMPLETED ? 'bg-green-500' : 'bg-green-500 animate-pulse'}`}></div>
+                           <span className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">{T.timeElapsed}</span>
+                           <span className="text-lg md:text-xl font-mono text-white font-medium tracking-wide">{formatTime(elapsedSeconds)}</span>
+                       </div>
+                       
+                       {/* Remaining */}
+                       <div className="bg-[#1a1a1a] rounded-xl p-3 md:p-4 border border-white/5 flex flex-col items-center justify-center min-h-[80px]">
+                           <span className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">{T.timeRem}</span>
+                           <span className="text-lg md:text-xl font-mono text-gray-400 font-medium tracking-wide">{remainingDisplay !== null ? formatTime(remainingDisplay) : "--:--"}</span>
+                       </div>
+                    </div>
+
+                    {/* Status Bar: Full Width Below Timers */}
+                    {currentStatusMsg && (
+                        <div className={`w-full bg-[#1a1a1a] border border-white/5 rounded-xl py-3 px-4 flex items-center justify-center gap-2 ${processingState === ProcessingState.ERROR ? 'text-red-400' : 'text-green-400'}`}>
+                            {processingState !== ProcessingState.ERROR && processingState !== ProcessingState.COMPLETED && (
+                                 <div className="w-2 h-2 bg-current rounded-full animate-bounce"></div>
+                            )}
+                            <span className="text-xs md:text-sm font-medium uppercase tracking-wider truncate">{currentStatusMsg}</span>
+                        </div>
+                    )}
+                 </div>
+              )}
+              
+              {/* Token Usage Stats - Subtle */}
               {sessionTokens > 0 && (
-                <div className="mb-4 flex items-center justify-between text-[10px] text-gray-600 px-1">
+                <div className="mb-3 flex items-center justify-between text-[10px] text-gray-600 px-1 border-b border-white/5 pb-2">
                    <span>TOKENS: {sessionTokens.toLocaleString()}</span>
-                   {/* Mobile only status message */}
-                   <span className="sm:hidden text-gray-500 truncate max-w-[200px]">{currentStatusMsg}</span>
                 </div>
               )}
 
-              <div className="h-48 overflow-y-auto font-mono text-xs space-y-2 pr-2 custom-scrollbar p-2">
+              {/* Logs Content - Larger Text */}
+              <div className="h-64 overflow-y-auto font-mono text-xs md:text-sm space-y-3 pr-2 custom-scrollbar p-1">
                 {logs.map((log) => (
                   <div key={log.id} className={`flex gap-3 leading-relaxed ${
                     log.type === 'error' ? 'text-red-400' : 
@@ -709,7 +708,7 @@ const App = () => {
 
           {/* Final Result */}
           {finalSummary && (
-            <div className="bg-[#212121] border border-white/20 rounded-[2rem] p-8 relative">
+            <div className="bg-[#212121] border border-white/20 rounded-[2rem] p-6 md:p-8 relative">
               <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 border-b border-white/5 pb-6 gap-4">
                 <div>
                   <h2 className="text-2xl font-serif text-white">{T.summaryTitle}</h2>
